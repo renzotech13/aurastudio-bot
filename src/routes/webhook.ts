@@ -23,6 +23,9 @@ function isDuplicate(messageId: string): boolean {
 }
 
 function verifySignature(rawBody: Buffer, signatureHeader: string | undefined): boolean {
+  // Sin WHATSAPP_APP_SECRET no hay nada que verificar — y sin número de
+  // WhatsApp conectado, Meta nunca va a llamar a esta ruta de todos modos.
+  if (!env.WHATSAPP_APP_SECRET) return false;
   if (!signatureHeader?.startsWith("sha256=")) return false;
   const expected = createHmac("sha256", env.WHATSAPP_APP_SECRET).update(rawBody).digest("hex");
   const provided = signatureHeader.slice("sha256=".length);

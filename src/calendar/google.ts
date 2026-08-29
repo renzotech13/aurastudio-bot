@@ -5,8 +5,19 @@ import { buildEventBody, type EventInput } from "./eventBuilder.js";
 
 let cachedClient: calendar_v3.Calendar | null = null;
 
+/** Lanza si Google Calendar no está configurado — quien llama a las
+ *  funciones de abajo ya envuelve esto en un try/catch que lo apaga a
+ *  null/false, así que el mensaje solo importa para el log. */
+function getCalendarId(): string {
+  if (!env.GOOGLE_CALENDAR_ID) throw new Error("Google Calendar no configurado (falta GOOGLE_CALENDAR_ID)");
+  return env.GOOGLE_CALENDAR_ID;
+}
+
 function getCalendarClient(): calendar_v3.Calendar {
   if (cachedClient) return cachedClient;
+  if (!env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    throw new Error("Google Calendar no configurado (falta GOOGLE_SERVICE_ACCOUNT_JSON)");
+  }
 
   const credentials = JSON.parse(env.GOOGLE_SERVICE_ACCOUNT_JSON) as { client_email: string; private_key: string };
   const auth = new google.auth.GoogleAuth({
@@ -24,12 +35,12 @@ function getCalendarClient(): calendar_v3.Calendar {
  * (dejar google_event_id en null para que retrySync.ts reintente después).
  */
 export async function createCalendarEvent(input: EventInput): Promise<string | null> {
-  const calendar = getCalendarClient();
   const eventBody = buildEventBody(input);
 
   try {
+    const calendar = getCalendarClient();
     const res = await calendar.events.insert({
-      calendarId: env.GOOGLE_CALENDAR_ID,
+      calendarId: getCalendarId(),
       requestBody: eventBody,
       // sendUpdates solo importa si hay attendees; sin ellos Google lo ignora.
       sendUpdates: eventBody.attendees ? "all" : "none",
@@ -45,7 +56,8 @@ export async function createCalendarEvent(input: EventInput): Promise<string | n
       logger.warn({ err }, "Falló crear el evento con asistente, reintentando sin invitar por correo");
       try {
         const { attendees: _attendees, ...sinAsistente } = eventBody;
-        const res = await calendar.events.insert({ calendarId: env.GOOGLE_CALENDAR_ID, requestBody: sinAsistente });
+        const calendar = getCalendarClient();
+        const res = await calendar.events.insert({ calendarId: getCalendarId(), requestBody: sinAsistente });
         return res.data.id ?? null;
       } catch (retryErr) {
         logger.error({ err: retryErr }, "No se pudo crear el evento de Google Calendar (ni siquiera sin asistente)");
@@ -61,7 +73,7 @@ export async function updateCalendarEvent(eventId: string, input: EventInput): P
   try {
     const calendar = getCalendarClient();
     await calendar.events.update({
-      calendarId: env.GOOGLE_CALENDAR_ID,
+      calendarId: getCalendarId(),
       eventId,
       requestBody: buildEventBody(input),
     });
@@ -75,7 +87,7 @@ export async function updateCalendarEvent(eventId: string, input: EventInput): P
 export async function deleteCalendarEvent(eventId: string): Promise<boolean> {
   try {
     const calendar = getCalendarClient();
-    await calendar.events.delete({ calendarId: env.GOOGLE_CALENDAR_ID, eventId });
+    await calendar.events.delete({ calendarId: getCalendarId(), eventId });
     return true;
   } catch (err) {
     logger.error({ err, eventId }, "No se pudo borrar el evento de Google Calendar");
@@ -98,7 +110,7 @@ export async function watchCalendar(params: {
   try {
     const calendar = getCalendarClient();
     const res = await calendar.events.watch({
-      calendarId: env.GOOGLE_CALENDAR_ID,
+      calendarId: getCalendarId(),
       requestBody: {
         id: params.channelId,
         type: "web_hook",
@@ -150,7 +162,7 @@ export async function listCalendarChanges(syncToken: string | null): Promise<Cal
   const calendar = getCalendarClient();
   try {
     const res = await calendar.events.list({
-      calendarId: env.GOOGLE_CALENDAR_ID,
+      calendarId: getCalendarId(),
       singleEvents: true,
       ...(syncToken ? { syncToken } : { timeMin: new Date().toISOString() }),
     });

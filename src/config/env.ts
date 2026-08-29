@@ -3,18 +3,24 @@ import { z } from "zod";
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
 
-  WHATSAPP_VERIFY_TOKEN: z.string().min(1),
-  WHATSAPP_APP_SECRET: z.string().min(1),
-  WHATSAPP_ACCESS_TOKEN: z.string().min(1),
-  WHATSAPP_PHONE_NUMBER_ID: z.string().min(1),
+  // WhatsApp, Anthropic y Google Calendar son OPCIONALES a propósito: el
+  // negocio puede salir en vivo con reservas web (Supabase + /public/*)
+  // antes de tener número de WhatsApp Business aprobado por Meta. Cada
+  // integración se apaga sola si falta su credencial — ver el aviso que
+  // imprime loadEnv() al arrancar — y se activa sin redeploy en cuanto se
+  // cargan las variables en Railway, solo reiniciando el servicio.
+  WHATSAPP_VERIFY_TOKEN: z.string().min(1).optional(),
+  WHATSAPP_APP_SECRET: z.string().min(1).optional(),
+  WHATSAPP_ACCESS_TOKEN: z.string().min(1).optional(),
+  WHATSAPP_PHONE_NUMBER_ID: z.string().min(1).optional(),
 
-  ANTHROPIC_API_KEY: z.string().min(1),
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
 
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
 
-  GOOGLE_SERVICE_ACCOUNT_JSON: z.string().min(1),
-  GOOGLE_CALENDAR_ID: z.string().min(1),
+  GOOGLE_SERVICE_ACCOUNT_JSON: z.string().min(1).optional(),
+  GOOGLE_CALENDAR_ID: z.string().min(1).optional(),
 
   // Sync bidireccional con Google Calendar (fase 7): PUBLIC_BASE_URL es la
   // URL pública del bot, necesaria para registrar el canal de webhooks
@@ -22,7 +28,7 @@ const envSchema = z.object({
   // quien despliega, igual que WHATSAPP_VERIFY_TOKEN: viaja en cada
   // notificación de Google para confirmar que no es de otro origen.
   PUBLIC_BASE_URL: z.string().url(),
-  GOOGLE_CALENDAR_WEBHOOK_TOKEN: z.string().min(1),
+  GOOGLE_CALENDAR_WEBHOOK_TOKEN: z.string().min(1).optional(),
 
   BUSINESS_TIMEZONE: z.string().default("America/Lima"),
   ESCALATION_PHONE: z.string().min(1),
@@ -69,3 +75,24 @@ function loadEnv(): Env {
 }
 
 export const env = loadEnv();
+
+export const whatsappConfigurado = Boolean(
+  env.WHATSAPP_VERIFY_TOKEN && env.WHATSAPP_APP_SECRET && env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID
+);
+export const anthropicConfigurado = Boolean(env.ANTHROPIC_API_KEY);
+export const googleCalendarConfigurado = Boolean(env.GOOGLE_SERVICE_ACCOUNT_JSON && env.GOOGLE_CALENDAR_ID);
+
+const pendientes: string[] = [];
+if (!whatsappConfigurado) pendientes.push("WhatsApp (webhook y envío de mensajes)");
+if (!anthropicConfigurado) pendientes.push("Anthropic (agente conversacional)");
+if (!googleCalendarConfigurado) pendientes.push("Google Calendar (sincronización de citas)");
+
+if (pendientes.length > 0) {
+  console.warn(
+    `⚠ Arrancando sin: ${pendientes.join(", ")}. ` +
+      `/public/disponibilidad y /public/reservas (reserva web) funcionan igual — ` +
+      `cargar las variables faltantes y reiniciar el servicio activa el resto sin redeploy.`
+  );
+} else {
+  console.info("✓ Todas las integraciones configuradas (WhatsApp, Anthropic, Google Calendar).");
+}

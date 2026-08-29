@@ -24,6 +24,8 @@ const RENOVAR_SI_QUEDAN_MENOS_DE_MS = 24 * 60 * 60_000;
  * el sistema desincronizado en silencio).
  */
 export async function sincronizarCambiosCalendar(): Promise<void> {
+  if (!env.GOOGLE_CALENDAR_ID || !env.GOOGLE_SERVICE_ACCOUNT_JSON) return;
+
   const estado = await getSyncState();
   const idsPropios = await getGoogleEventIdsPropios();
 
@@ -78,6 +80,11 @@ export async function sincronizarCambiosCalendar(): Promise<void> {
  * más adelante y no vuelve a avisar (no genera duplicados ni errores).
  */
 export async function asegurarCanalWebhook(): Promise<void> {
+  // Google Calendar es opcional (ver env.ts): sin credenciales, no hay
+  // calendario que sincronizar — el aviso de arranque ya lo deja claro.
+  if (!env.GOOGLE_CALENDAR_WEBHOOK_TOKEN) return;
+  const webhookToken = env.GOOGLE_CALENDAR_WEBHOOK_TOKEN;
+
   const estado = await getSyncState();
 
   const vence = estado.channel_expira_at ? new Date(estado.channel_expira_at).getTime() : 0;
@@ -93,7 +100,7 @@ export async function asegurarCanalWebhook(): Promise<void> {
   const resultado = await watchCalendar({
     channelId,
     address: `${env.PUBLIC_BASE_URL}/calendar/webhook`,
-    token: env.GOOGLE_CALENDAR_WEBHOOK_TOKEN,
+    token: webhookToken,
     expirationEpochMs: expiraEn,
   });
 
