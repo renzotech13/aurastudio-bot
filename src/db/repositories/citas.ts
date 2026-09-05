@@ -42,6 +42,14 @@ export async function crearCita(params: {
   finUtc: Date;
   creadaPor?: "bot" | "humano";
   notas?: string;
+  /**
+   * Citas que NO deben contar como ocupadas al validar este hueco. Existe
+   * para las reservas de varios servicios: las citas hermanas ya insertadas
+   * son contiguas a propósito, y el colchón de BUFFER_MINUTES no va entre
+   * ellas — va entre clientas distintas. Sin esto, la segunda cita de toda
+   * reserva múltiple choca contra la primera y la reserva entera falla.
+   */
+  ignorarCitaIds?: string[];
 }): Promise<CrearCitaResult> {
   const desdeRango = new Date(params.inicioUtc.getTime() - 24 * 60 * 60_000);
   const hastaRango = new Date(params.finUtc.getTime() + 24 * 60 * 60_000);
@@ -52,13 +60,18 @@ export async function crearCita(params: {
     listarCitasEnRango(desdeRango, hastaRango),
   ]);
 
+  const ignorar = new Set(params.ignorarCitaIds ?? []);
+  const citasQueEstorban = ignorar.size
+    ? existingCitas.filter((c) => !c.id || !ignorar.has(c.id))
+    : existingCitas;
+
   const check = isSlotAvailable({
     inicioUtc: params.inicioUtc,
     finUtc: params.finUtc,
     timezone: BUSINESS_TIMEZONE,
     businessHours,
     bloqueos,
-    existingCitas,
+    existingCitas: citasQueEstorban,
     bufferMinutes: BUFFER_MINUTES,
     minLeadMinutes: MIN_LEAD_MINUTES,
     now: new Date(),
@@ -216,6 +229,11 @@ export async function crearCitasConsecutivas(params: {
       inicioUtc: cursor,
       finUtc,
       creadaPor: params.creadaPor,
+      // Las hermanas ya insertadas de ESTA reserva no se cuentan como
+      // ocupadas: son contiguas por diseño y el colchón no aplica entre
+      // ellas. El EXCLUDE de Postgres sigue siendo la garantía real, y como
+      // los rangos son '[)' dos citas consecutivas no se solapan para él.
+      ignorarCitaIds: citasCreadas.map((c) => c.id),
       ...(params.notas ? { notas: params.notas } : {}),
     });
 
@@ -234,12 +252,13 @@ export async function crearCitasConsecutivas(params: {
 async function listarCitasEnRango(desdeUtc: Date, hastaUtc: Date): Promise<ExistingCita[]> {
   const { data, error } = await supabase
     .from("citas")
-    .select("inicio_utc,fin_utc")
+    .select("id,inicio_utc,fin_utc")
     .neq("estado", "cancelada")
     .lt("inicio_utc", hastaUtc.toISOString())
     .gt("fin_utc", desdeUtc.toISOString());
   if (error) throw error;
   return (data ?? []).map((row) => ({
+    id: row.id as string,
     inicioUtc: new Date(row.inicio_utc as string),
     finUtc: new Date(row.fin_utc as string),
   }));

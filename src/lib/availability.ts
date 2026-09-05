@@ -8,7 +8,12 @@
 
 export type BusinessHourBlock = { weekday: number; opensAt: string; closesAt: string };
 export type Bloqueo = { inicioUtc: Date; finUtc: Date };
-export type ExistingCita = { inicioUtc: Date; finUtc: Date };
+/**
+ * `id` es opcional porque el motor no lo usa para decidir: sirve para que
+ * el llamador pueda descartar citas concretas antes de consultar (ver
+ * `ignorarCitaIds` en crearCita).
+ */
+export type ExistingCita = { inicioUtc: Date; finUtc: Date; id?: string };
 
 export type AvailabilityParams = {
   inicioUtc: Date;
