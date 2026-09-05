@@ -93,12 +93,15 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("FECHA DE HOY");
   });
 
+  // Los valores son los de Aura Studio: horario de la migración 0005 (todos
+  // los días 10:00–21:00) y la sede de Los Olivos. Este test venía heredado
+  // del negocio del que se clonó el bot y comprobaba SU horario y SU
+  // dirección, así que fallaba en rojo sin vigilar nada de Aura.
   it("incluye horario, dirección y política de cancelación reales", async () => {
     const prompt = await buildSystemPrompt();
-    expect(prompt).toContain("8:00am–12:00pm");
-    expect(prompt).toContain("Domingo cerrado");
+    expect(prompt).toContain("Todos los días, 10:00am–9:00pm.");
     expect(prompt).toContain("30 minutos de antelación");
-    expect(prompt).toContain("Av. José Santos Chocano 1330");
+    expect(prompt).toContain("Av. Manuel González Prada 757");
   });
 
   it("incluye la regla dura de no inventar disponibilidad/precios", async () => {
