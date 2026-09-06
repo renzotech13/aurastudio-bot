@@ -4,6 +4,7 @@ import {
   getAvailableSlots,
   getLocalWeekdayAndTime,
   isSlotAvailable,
+  timeStringToUtcDate,
   type BusinessHourBlock,
 } from "../src/lib/availability.js";
 
@@ -227,5 +228,32 @@ describe("citasQueOcupanA", () => {
   it("sin profesional objetivo se devuelve todo (agenda del local)", () => {
     const todas = [cita("a", "prof-1"), cita("b", null)];
     expect(citasQueOcupanA(todas, null)).toEqual(todas);
+  });
+});
+
+/**
+ * Regresión: la ventana de disponibilidad se calcula con "00:00", y a esa hora
+ * el instante UTC ingenuo cae en el día local ANTERIOR (Lima es UTC-5). La
+ * resta de minutos salía desviada 1440 y la consulta terminaba mirando el día
+ * equivocado, así que las citas existentes no bloqueaban nada y el sitio
+ * ofrecía horarios ya ocupados.
+ */
+describe("timeStringToUtcDate en el cambio de día", () => {
+  it("medianoche de Lima es 05:00 UTC del MISMO día", () => {
+    const d = timeStringToUtcDate("2026-09-08", "00:00", "America/Lima");
+    expect(d.toISOString()).toBe("2026-09-08T05:00:00.000Z");
+  });
+
+  it("las horas de trabajo siguen bien (no había regresión ahí)", () => {
+    expect(timeStringToUtcDate("2026-09-08", "10:00", "America/Lima").toISOString())
+      .toBe("2026-09-08T15:00:00.000Z");
+    expect(timeStringToUtcDate("2026-09-08", "21:00", "America/Lima").toISOString())
+      .toBe("2026-09-09T02:00:00.000Z");
+  });
+
+  it("da la vuelta correctamente en una zona de offset positivo", () => {
+    // Calcuta es UTC+5:30: las 01:00 locales son las 19:30 UTC del día previo.
+    expect(timeStringToUtcDate("2026-09-08", "01:00", "Asia/Kolkata").toISOString())
+      .toBe("2026-09-07T19:30:00.000Z");
   });
 });

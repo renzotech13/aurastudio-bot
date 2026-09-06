@@ -184,6 +184,15 @@ export function timeStringToUtcDate(fechaLocal: string, time: string, timezone: 
   const localAtNaiveUtc = getLocalWeekdayAndTime(naiveUtc, timezone).time;
   const [naiveHour, naiveMinute] = time.split(":").map(Number);
   const [localHour, localMinute] = localAtNaiveUtc.split(":").map(Number);
-  const diffMinutes = (naiveHour! * 60 + naiveMinute!) - (localHour! * 60 + localMinute!);
+  let diffMinutes = (naiveHour! * 60 + naiveMinute!) - (localHour! * 60 + localMinute!);
+  // Las dos horas se comparan como "minutos dentro del día", así que cuando el
+  // instante UTC ingenuo cae en otro día local la resta sale desviada 1440
+  // minutos. Pasa justo con "00:00" en zonas de offset negativo: en Lima, las
+  // 00:00Z son las 19:00 del día anterior, y sin esta corrección la ventana de
+  // disponibilidad terminaba consultando el día equivocado — las citas
+  // existentes no bloqueaban nada y el sitio ofrecía horarios ya ocupados.
+  // Ningún offset real supera las 12 horas, así que ese es el punto de corte.
+  if (diffMinutes > 720) diffMinutes -= 1440;
+  if (diffMinutes <= -720) diffMinutes += 1440;
   return new Date(naiveUtc.getTime() + diffMinutes * 60_000);
 }
