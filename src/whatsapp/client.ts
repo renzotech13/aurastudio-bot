@@ -145,3 +145,66 @@ export async function sendButtons(to: string, body: string, options: ButtonOptio
     },
   });
 }
+
+export type PlantillaEstado = "APPROVED" | "PENDING" | "REJECTED" | "PAUSED" | "DISABLED";
+
+export type Plantilla = {
+  nombre: string;
+  estado: PlantillaEstado;
+  categoria: "UTILITY" | "MARKETING" | "AUTHENTICATION";
+  idioma: string;
+  /** Cuántas {{n}} tiene el cuerpo — es lo que decide cuántos parámetros pedir al enviar. */
+  variables: number;
+};
+
+/**
+ * Las plantillas cuelgan de la CUENTA de WhatsApp Business (WABA), no del
+ * número de teléfono — por eso esto pega a `WHATSAPP_WABA_ID` y no a
+ * `WHATSAPP_PHONE_NUMBER_ID` como el resto de este archivo. Sin la variable
+ * puesta no hay forma de listarlas (el endpoint de teléfono no tiene ese
+ * edge — probado, Meta responde "Tried accessing nonexisting field").
+ */
+export async function listarPlantillas(): Promise<Plantilla[]> {
+  if (!env.WHATSAPP_WABA_ID) {
+    throw new AppError(
+      "Falta WHATSAPP_WABA_ID: sin esa variable no se puede listar plantillas.",
+      "waba_id_no_configurado",
+      500,
+    );
+  }
+
+  const url =
+    `${GRAPH_BASE_URL}/${env.WHATSAPP_WABA_ID}/message_templates` +
+    `?fields=name,status,category,language,components&limit=100`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` } });
+  if (!res.ok) {
+    const errorBody = await res.text();
+    logger.error({ status: res.status, errorBody }, "Falló al listar plantillas de WhatsApp");
+    throw new AppError("No se pudieron obtener las plantillas de Meta", "whatsapp_templates_failed", 502);
+  }
+
+  type Respuesta = {
+    data: {
+      name: string;
+      status: PlantillaEstado;
+      category: Plantilla["categoria"];
+      language: string;
+      components?: { type: string; text?: string }[];
+    }[];
+  };
+  const data = (await res.json()) as Respuesta;
+
+  return data.data.map((t) => {
+    const cuerpo = t.components?.find((c) => c.type === "BODY")?.text ?? "";
+    // {{1}} {{2}}… — el número más alto es la cantidad real de variables,
+    // aunque estén repetidas o fuera de orden en el texto.
+    const numeros = [...cuerpo.matchAll(/\{\{(\d+)\}\}/g)].map((m) => Number(m[1]));
+    return {
+      nombre: t.name,
+      estado: t.status,
+      categoria: t.category,
+      idioma: t.language,
+      variables: numeros.length ? Math.max(...numeros) : 0,
+    };
+  });
+}

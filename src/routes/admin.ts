@@ -12,7 +12,7 @@ import { actualizarEstadoCita } from "../db/repositories/citas.js";
 import { getBloqueoPorId, eliminarBloqueoPorId } from "../db/repositories/bloqueos.js";
 import { getPlantillaById, urlPublicaPlantilla } from "../db/repositories/plantillasMedia.js";
 import { deleteCalendarEvent } from "../calendar/google.js";
-import { sendText, sendTemplate, sendMedia } from "../whatsapp/client.js";
+import { sendText, sendTemplate, sendMedia, listarPlantillas } from "../whatsapp/client.js";
 import { isWindowOpenFor } from "../whatsapp/window.js";
 
 // Exactamente uno de los dos: o el staff escribe texto, o elige una
@@ -90,6 +90,19 @@ export async function adminRoutes(app: FastifyInstance) {
 
     logger.info({ conversacionId }, "Mensaje humano enviado desde el panel");
     return reply.status(201).send({ mensaje });
+  });
+
+  /**
+   * Plantillas de WhatsApp aprobadas por Meta (o pendientes/rechazadas, para
+   * que el staff sepa por qué no aparecen como opción todavía). El panel las
+   * usa para armar el envío de promociones sin que nadie tenga que copiar el
+   * nombre a mano desde el Administrador de WhatsApp ni adivinar cuántas
+   * variables lleva el cuerpo.
+   */
+  app.get("/admin/plantillas", async (request: FastifyRequest, reply: FastifyReply) => {
+    await requireStaff(request.headers.authorization);
+    const plantillas = await listarPlantillas();
+    return reply.send({ plantillas });
   });
 
   /**

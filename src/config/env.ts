@@ -13,6 +13,8 @@ const envSchema = z.object({
   WHATSAPP_APP_SECRET: z.string().min(1).optional(),
   WHATSAPP_ACCESS_TOKEN: z.string().min(1).optional(),
   WHATSAPP_PHONE_NUMBER_ID: z.string().min(1).optional(),
+  /** Cuenta de WhatsApp Business — de acá cuelgan las plantillas, no del número. */
+  WHATSAPP_WABA_ID: z.string().min(1).optional(),
 
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
 
