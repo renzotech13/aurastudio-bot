@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  citasQueOcupanA,
   getAvailableSlots,
   getLocalWeekdayAndTime,
   isSlotAvailable,
@@ -189,5 +190,42 @@ describe("getAvailableSlots", () => {
       now: limaLocalToUtc(CLOSED_DATE, "00:00"),
     });
     expect(slots).toEqual([]);
+  });
+});
+
+/**
+ * La regla que hace posible atender a dos clientas a la vez (migración 0014).
+ * Antes de ella, cualquier cita del local ocupaba a todo el mundo.
+ */
+describe("citasQueOcupanA", () => {
+  const cita = (id: string, profesionalId: string | null) => ({
+    id,
+    inicioUtc: new Date("2026-09-10T15:00:00Z"),
+    finUtc: new Date("2026-09-10T16:00:00Z"),
+    profesionalId,
+  });
+
+  it("la cita de otra profesional no estorba", () => {
+    const resultado = citasQueOcupanA([cita("a", "prof-1")], "prof-2");
+    expect(resultado).toEqual([]);
+  });
+
+  it("la cita de la misma profesional sí estorba", () => {
+    const suya = cita("a", "prof-1");
+    expect(citasQueOcupanA([suya], "prof-1")).toEqual([suya]);
+  });
+
+  it("una cita sin profesional ocupa a todas", () => {
+    // Son las citas anteriores a la 0014: no se sabe con quién son, así que
+    // se asumen ocupadas. Dejarlas pasar permitiría agendar encima de una
+    // cita real.
+    const vieja = cita("a", null);
+    expect(citasQueOcupanA([vieja], "prof-1")).toEqual([vieja]);
+    expect(citasQueOcupanA([vieja], "prof-2")).toEqual([vieja]);
+  });
+
+  it("sin profesional objetivo se devuelve todo (agenda del local)", () => {
+    const todas = [cita("a", "prof-1"), cita("b", null)];
+    expect(citasQueOcupanA(todas, null)).toEqual(todas);
   });
 });

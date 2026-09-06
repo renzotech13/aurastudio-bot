@@ -12,8 +12,26 @@ export type Bloqueo = { inicioUtc: Date; finUtc: Date };
  * `id` es opcional porque el motor no lo usa para decidir: sirve para que
  * el llamador pueda descartar citas concretas antes de consultar (ver
  * `ignorarCitaIds` en crearCita).
+ *
+ * `profesionalId` tampoco lo usa el motor: filtrar por profesional es
+ * decisión del llamador (ver `citasQueOcupanA`). El motor sigue recibiendo
+ * una lista plana de "esto está ocupado" y no sabe de quién es.
  */
-export type ExistingCita = { inicioUtc: Date; finUtc: Date; id?: string };
+export type ExistingCita = { inicioUtc: Date; finUtc: Date; id?: string; profesionalId?: string | null };
+
+/**
+ * Qué citas le estorban a una profesional concreta.
+ *
+ * Una cita con `profesionalId` null ocupa a TODAS: son las citas anteriores a
+ * la migración 0014, que no sabemos con quién son. Tratarlas como libres
+ * dejaría agendar encima de una cita real; tratarlas como ocupadas sólo
+ * sacrifica algunos huecos, y el problema se extingue solo a medida que esas
+ * citas viejas pasan de fecha.
+ */
+export function citasQueOcupanA(citas: ExistingCita[], profesionalId: string | null): ExistingCita[] {
+  if (!profesionalId) return citas;
+  return citas.filter((c) => c.profesionalId == null || c.profesionalId === profesionalId);
+}
 
 export type AvailabilityParams = {
   inicioUtc: Date;

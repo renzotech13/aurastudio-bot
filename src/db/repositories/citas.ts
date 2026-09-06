@@ -4,7 +4,7 @@ import { getBloqueosEnRango } from "./bloqueos.js";
 import { getServiceById } from "./services.js";
 import { getClienteById } from "./clientes.js";
 import { createCalendarEvent, deleteCalendarEvent } from "../../calendar/google.js";
-import { isSlotAvailable, type ExistingCita } from "../../lib/availability.js";
+import { citasQueOcupanA, isSlotAvailable, type ExistingCita } from "../../lib/availability.js";
 import { BUFFER_MINUTES, MIN_LEAD_MINUTES, BUSINESS_TIMEZONE } from "../../config/business.js";
 import { logger } from "../../lib/logger.js";
 
@@ -50,6 +50,15 @@ export async function crearCita(params: {
    * reserva múltiple choca contra la primera y la reserva entera falla.
    */
   ignorarCitaIds?: string[];
+  /**
+   * Con quién es la cita. Si viene, el solapamiento se evalúa SOLO contra las
+   * citas de esa profesional: dos clientas a la misma hora con profesionales
+   * distintas es lo normal, no un conflicto. Sin esto, la restricción por
+   * profesional de la migración 0014 quedaría desaprovechada porque el
+   * chequeo previo en memoria seguiría rechazando el hueco.
+   */
+  profesionalId?: string | null;
+  sedeId?: string | null;
 }): Promise<CrearCitaResult> {
   const desdeRango = new Date(params.inicioUtc.getTime() - 24 * 60 * 60_000);
   const hastaRango = new Date(params.finUtc.getTime() + 24 * 60 * 60_000);
@@ -61,9 +70,10 @@ export async function crearCita(params: {
   ]);
 
   const ignorar = new Set(params.ignorarCitaIds ?? []);
-  const citasQueEstorban = ignorar.size
+  const sinIgnoradas = ignorar.size
     ? existingCitas.filter((c) => !c.id || !ignorar.has(c.id))
     : existingCitas;
+  const citasQueEstorban = citasQueOcupanA(sinIgnoradas, params.profesionalId ?? null);
 
   const check = isSlotAvailable({
     inicioUtc: params.inicioUtc,
@@ -89,6 +99,8 @@ export async function crearCita(params: {
       fin_utc: params.finUtc.toISOString(),
       creada_por: params.creadaPor ?? "bot",
       notas: params.notas ?? null,
+      profesional_id: params.profesionalId ?? null,
+      sede_id: params.sedeId ?? null,
     })
     .select("*")
     .single();
@@ -211,6 +223,9 @@ export async function crearCitasConsecutivas(params: {
   inicioUtc: Date;
   creadaPor: "bot" | "humano";
   notas?: string;
+  /** Todos los servicios de una misma reserva van con la misma profesional. */
+  profesionalId?: string | null;
+  sedeId?: string | null;
 }): Promise<CrearCitasConsecutivasResult> {
   const citasCreadas: Cita[] = [];
   let cursor = params.inicioUtc;
@@ -234,6 +249,8 @@ export async function crearCitasConsecutivas(params: {
       // ellas. El EXCLUDE de Postgres sigue siendo la garantía real, y como
       // los rangos son '[)' dos citas consecutivas no se solapan para él.
       ignorarCitaIds: citasCreadas.map((c) => c.id),
+      profesionalId: params.profesionalId ?? null,
+      sedeId: params.sedeId ?? null,
       ...(params.notas ? { notas: params.notas } : {}),
     });
 
@@ -252,7 +269,7 @@ export async function crearCitasConsecutivas(params: {
 async function listarCitasEnRango(desdeUtc: Date, hastaUtc: Date): Promise<ExistingCita[]> {
   const { data, error } = await supabase
     .from("citas")
-    .select("id,inicio_utc,fin_utc")
+    .select("id,inicio_utc,fin_utc,profesional_id")
     .neq("estado", "cancelada")
     .lt("inicio_utc", hastaUtc.toISOString())
     .gt("fin_utc", desdeUtc.toISOString());
@@ -261,6 +278,7 @@ async function listarCitasEnRango(desdeUtc: Date, hastaUtc: Date): Promise<Exist
     id: row.id as string,
     inicioUtc: new Date(row.inicio_utc as string),
     finUtc: new Date(row.fin_utc as string),
+    profesionalId: (row.profesional_id as string | null) ?? null,
   }));
 }
 
