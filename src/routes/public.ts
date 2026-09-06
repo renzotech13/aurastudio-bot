@@ -33,6 +33,11 @@ const equipoQuerySchema = z.object({
   sede_id: z.string().min(1),
 });
 
+const adelantoQuerySchema = z.object({
+  servicio_ids: z.string().min(1),
+  sede_id: z.string().min(1),
+});
+
 const reservaBodySchema = z.object({
   servicio_ids: z.array(z.string()).min(1).max(10),
   fecha: z.string().regex(FECHA_REGEX),
@@ -128,6 +133,41 @@ export async function publicRoutes(app: FastifyInstance) {
     return reply.send(
       equipo.map((p) => ({ id: p.id, nombre: p.nombre, rol: p.rol, foto_url: p.foto_url })),
     );
+  });
+
+  /**
+   * Cuánto hay que adelantar para apartar el horario, y a qué Yape.
+   *
+   * El adelanto es POR RESERVA, no por servicio: quien pide tres servicios no
+   * puede recibir tres pedidos de adelanto. Se cobra el más alto de los
+   * elegidos — el del servicio que más compromete la agenda — y va a cuenta
+   * del total.
+   *
+   * Mientras nadie haya cargado `services.deposit_amount` ni el Yape de la
+   * sede, esto devuelve monto 0 y el modal se salta el paso entero en vez de
+   * pedir un pago a un número que no existe.
+   */
+  app.get("/public/adelanto", async (request: FastifyRequest, reply: FastifyReply) => {
+    if (isRateLimited(`ade:${request.ip}`, env.PUBLIC_RATE_LIMIT_MAX_PER_MINUTE)) {
+      return reply.status(429).send({ error: "demasiadas_solicitudes" });
+    }
+    const parsed = adelantoQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.status(400).send({ error: "invalid_query", detail: parsed.error.issues });
+
+    const ids = parsed.data.servicio_ids.split(",").filter(Boolean);
+    const servicios = await Promise.all(ids.map((id) => getServiceById(id)));
+    const montos = servicios.map((s) => s?.deposit_amount ?? 0);
+    const monto = montos.length ? Math.max(...montos) : 0;
+
+    const sede = (await listarSedes()).find((x) => x.id === parsed.data.sede_id) ?? null;
+    return reply.send({
+      monto,
+      yape_numero: sede?.yape_numero ?? null,
+      yape_titular: sede?.yape_titular ?? null,
+      // Sin número al que pagar no se puede pedir el adelanto por más que el
+      // monto esté configurado.
+      requerido: monto > 0 && !!sede?.yape_numero,
+    });
   });
 
   app.post("/public/reservas", async (request: FastifyRequest, reply: FastifyReply) => {
