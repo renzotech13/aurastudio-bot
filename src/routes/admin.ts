@@ -1,19 +1,28 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { env } from "../config/env.js";
+import { env, whatsappConfigurado, metaConfigurado, instagramConfigurado } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 import { requireStaff } from "../lib/adminAuth.js";
-import { getConversacionConCliente } from "../db/repositories/conversaciones.js";
-import { guardarMensaje } from "../db/repositories/mensajes.js";
-import { getClienteById, findOrCreateByPhone } from "../db/repositories/clientes.js";
+import { normalizarTelefono } from "../lib/telefono.js";
+import {
+  getConversacionConDestino,
+  getOrCreateConversacionAbierta,
+} from "../db/repositories/conversaciones.js";
+import { guardarMensaje, getMensajeById, actualizarMetadataPorExternalId } from "../db/repositories/mensajes.js";
+import { getClienteById, findOrCreateByPhone, getClienteByTelefono, guardarTelefonoCliente, fusionarClientes } from "../db/repositories/clientes.js";
+import { registrarEvento } from "../db/repositories/eventos.js";
 import { reservarNotificacion, marcarEnviada, marcarFallida } from "../db/repositories/notificaciones.js";
 import { actualizarEstadoCita, crearCitasConsecutivas } from "../db/repositories/citas.js";
 import { getProfesionalEnSede } from "../db/repositories/profesionales.js";
 import { getBloqueoPorId, eliminarBloqueoPorId } from "../db/repositories/bloqueos.js";
 import { getPlantillaById, urlPublicaPlantilla } from "../db/repositories/plantillasMedia.js";
 import { deleteCalendarEvent } from "../calendar/google.js";
-import { sendText, sendTemplate, sendMedia, listarPlantillas } from "../whatsapp/client.js";
-import { isWindowOpenFor } from "../whatsapp/window.js";
+import { sendTemplate, listarPlantillas } from "../whatsapp/client.js";
+import { getCanalAdapter } from "../canales/index.js";
+import { runAgent } from "../agent/runner.js";
+import { responderComentarioPublico, responderComentarioPrivado, estadoConexion, marcarVisto } from "../meta/client.js";
+import { vincularIdentidadMensajeria } from "../meta/identidades.js";
+import type { CanalMeta } from "../meta/parser.js";
 
 // Exactamente uno de los dos: o el staff escribe texto, o elige una
 // plantilla multimedia de la biblioteca — nunca ambos ni ninguno.
@@ -53,16 +62,29 @@ const citaEstadoSchema = z.object({
   estado: z.enum(["confirmada", "cancelada", "completada", "no_asistio"]),
 });
 
+const comentarioResponderSchema = z.object({
+  modo: z.enum(["publico", "privado"]),
+  texto: z.string().trim().min(1).max(2000),
+});
+
+const clienteTelefonoSchema = z.object({
+  telefono: z.string().trim().min(6),
+  fusionar: z.boolean().optional(),
+});
+
+const SIETE_DIAS_MS = 7 * 24 * 60 * 60_000;
+
 export async function adminRoutes(app: FastifyInstance) {
   /**
-   * Respuesta escrita por un humano del staff desde el panel.
+   * Respuesta escrita por un humano del staff desde el panel — WhatsApp,
+   * Messenger o Instagram, el mismo endpoint para los tres.
    *
-   * El envío va antes de guardar a propósito: si WhatsApp rechaza el
+   * El envío va antes de guardar a propósito: si el canal rechaza el
    * mensaje, no queremos dejar en el historial algo que la clienta nunca
    * recibió (y que Claude luego leería como contexto real).
    */
   app.post("/admin/mensajes", async (request: FastifyRequest, reply: FastifyReply) => {
-    await requireStaff(request.headers.authorization);
+    const staff = await requireStaff(request.headers.authorization);
 
     const parsed = mensajeSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -70,53 +92,250 @@ export async function adminRoutes(app: FastifyInstance) {
     }
     const { conversacionId, texto, plantillaId } = parsed.data;
 
-    const found = await getConversacionConCliente(conversacionId);
+    const found = await getConversacionConDestino(conversacionId);
     if (!found) return reply.status(404).send({ error: "conversacion_no_encontrada" });
 
-    // Hoy todas las conversaciones son de WhatsApp, así que siempre hay
-    // teléfono; la guarda existe porque la columna ya admite null desde la
-    // 0017 y esta ruta todavía no sabe enviar por Messenger ni Instagram.
-    const telefono = found.telefono;
-    if (!telefono) {
+    if (!found.destinatarioId) {
       return reply.status(409).send({
         error: "sin_telefono",
-        mensaje: "Esta clienta todavía no dio su número de WhatsApp, así que no se le puede escribir por acá.",
+        mensaje: "Todavía no se resolvió a quién enviarle: esta clienta no tiene una identidad de mensajería registrada.",
       });
     }
 
-    if (!(await isWindowOpenFor(telefono))) {
-      // Meta rechaza el texto libre pasadas 24h del último mensaje del
-      // cliente (error 131047). Se avisa explícito para que el panel pueda
-      // ofrecer una plantilla en vez de fallar sin explicación.
-      return reply.status(409).send({
-        error: "ventana_cerrada",
-        mensaje:
-          "Pasaron más de 24 horas desde el último mensaje de la clienta. WhatsApp solo permite retomar el contacto con una plantilla aprobada.",
-      });
-    }
+    const adapter = getCanalAdapter(found.conversacion.canal);
+    const ultimoMensajeAt = found.conversacion.ultimo_mensaje_at;
 
     let mensaje;
     if (texto) {
-      const waMessageId = await sendText(telefono, texto);
-      mensaje = await guardarMensaje({ conversacionId, rol: "humano", contenido: texto, waMessageId });
+      const resultado = await adapter.enviarTexto({ destinatarioId: found.destinatarioId, texto, rol: "humano", ultimoMensajeAt });
+      if (!resultado.externalId) {
+        return reply.status(409).send({ error: "ventana_cerrada", mensaje: resultado.motivoCierre });
+      }
+      mensaje = await guardarMensaje({ conversacionId, rol: "humano", contenido: texto, externalId: resultado.externalId, autorId: staff.id });
     } else {
       const plantilla = await getPlantillaById(plantillaId!);
       if (!plantilla) return reply.status(404).send({ error: "plantilla_no_encontrada" });
 
       const url = urlPublicaPlantilla(plantilla.storage_path);
-      const waMessageId = await sendMedia({ to: telefono, tipo: plantilla.tipo, link: url, caption: plantilla.caption });
+      const resultado = await adapter.enviarMedia({
+        destinatarioId: found.destinatarioId,
+        tipo: plantilla.tipo,
+        url,
+        caption: plantilla.caption,
+        rol: "humano",
+        ultimoMensajeAt,
+      });
+      if (!resultado.externalId) {
+        return reply.status(409).send({ error: "ventana_cerrada", mensaje: resultado.motivoCierre });
+      }
       mensaje = await guardarMensaje({
         conversacionId,
         rol: "humano",
         contenido: `[${plantilla.tipo}] ${plantilla.nombre}`,
         mediaUrl: url,
         mediaType: plantilla.tipo,
-        waMessageId,
+        externalId: resultado.externalId,
+        autorId: staff.id,
       });
     }
 
-    logger.info({ conversacionId }, "Mensaje humano enviado desde el panel");
+    logger.info({ conversacionId, canal: found.conversacion.canal }, "Mensaje humano enviado desde el panel");
     return reply.status(201).send({ mensaje });
+  });
+
+  /**
+   * Responder un comentario de Facebook/Instagram: en público (respuesta
+   * visible bajo el comentario) o en privado (Send API, una sola vez por
+   * comentario, hasta 7 días desde que se creó).
+   */
+  app.post("/admin/comentarios/:mensajeId/responder", async (request: FastifyRequest, reply: FastifyReply) => {
+    const staff = await requireStaff(request.headers.authorization);
+
+    const parsed = comentarioResponderSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
+
+    const { mensajeId } = request.params as { mensajeId: string };
+    const comentario = await getMensajeById(mensajeId);
+    if (!comentario || comentario.tipo !== "comentario" || !comentario.external_id) {
+      return reply.status(404).send({ error: "comentario_no_encontrado" });
+    }
+
+    const conv = await getConversacionConDestino(comentario.conversacion_id);
+    if (!conv) return reply.status(404).send({ error: "conversacion_no_encontrada" });
+    const canal = conv.conversacion.canal;
+    if (canal === "whatsapp") return reply.status(400).send({ error: "canal_no_soportado" });
+    const canalMeta = canal as CanalMeta;
+
+    if (parsed.data.modo === "publico") {
+      const resultado = await responderComentarioPublico({ canal: canalMeta, commentId: comentario.external_id, texto: parsed.data.texto });
+      const nuevo = await guardarMensaje({
+        conversacionId: comentario.conversacion_id,
+        rol: "humano",
+        tipo: "comentario",
+        contenido: parsed.data.texto,
+        externalId: resultado.commentId,
+        autorId: staff.id,
+        metadata: { parent_id: comentario.external_id },
+      });
+      logger.info({ conversacionId: comentario.conversacion_id }, "Respuesta pública a comentario enviada desde el panel");
+      return reply.status(201).send({ mensaje: nuevo });
+    }
+
+    // modo === "privado": Meta permite UNA por comentario, hasta 7 días.
+    const yaRespondido = (comentario.metadata as Record<string, unknown> | null)?.respondido_privado === true;
+    const pasaron7dias = Date.now() - new Date(comentario.created_at).getTime() > SIETE_DIAS_MS;
+    if (yaRespondido || pasaron7dias) {
+      return reply.status(409).send({ error: "comentario_no_admite_privado" });
+    }
+
+    const resultado = await responderComentarioPrivado({ canal: canalMeta, commentId: comentario.external_id, texto: parsed.data.texto });
+
+    const identidadDm = await vincularIdentidadMensajeria({
+      clienteId: conv.clienteId,
+      canal: canalMeta,
+      tipo: canalMeta === "instagram" ? "igsid" : "psid",
+      externalId: resultado.recipientId,
+      cuentaId: conv.conversacion.cuenta_id,
+    });
+    const conversacionDm = await getOrCreateConversacionAbierta({
+      clienteId: conv.clienteId,
+      canal: canalMeta,
+      origen: "dm",
+      identidadId: identidadDm.id,
+      cuentaId: conv.conversacion.cuenta_id,
+    });
+
+    await guardarMensaje({
+      conversacionId: conversacionDm.id,
+      rol: "humano",
+      contenido: parsed.data.texto,
+      externalId: resultado.messageId,
+      autorId: staff.id,
+    });
+    await guardarMensaje({
+      conversacionId: comentario.conversacion_id,
+      rol: "humano",
+      tipo: "sistema",
+      contenido: "Respuesta privada enviada desde el panel.",
+      autorId: staff.id,
+    });
+    await actualizarMetadataPorExternalId(comentario.external_id, { respondido_privado: true });
+    await registrarEvento(comentario.conversacion_id, "respuesta_privada", { comment_id: comentario.external_id }).catch((err: unknown) =>
+      logger.error({ err }, "No se pudo registrar el evento de respuesta privada"),
+    );
+
+    logger.info({ conversacionId: comentario.conversacion_id }, "Respuesta privada a comentario enviada desde el panel");
+    return reply.send({ conversacionDmId: conversacionDm.id });
+  });
+
+  /**
+   * Borrador de respuesta para que el staff revise antes de mandar — nunca
+   * envía ni guarda nada solo. `runAgent(..., { modo: "sugerir" })` excluye
+   * las tools que mutan y no escala la conversación ante ningún fallo.
+   */
+  app.post("/admin/ia/sugerencia", async (request: FastifyRequest, reply: FastifyReply) => {
+    await requireStaff(request.headers.authorization);
+
+    const parsed = z.object({ conversacionId: z.string().uuid() }).safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
+
+    const conv = await getConversacionConDestino(parsed.data.conversacionId);
+    if (!conv) return reply.status(404).send({ error: "conversacion_no_encontrada" });
+
+    const texto = await runAgent(
+      {
+        canal: conv.conversacion.canal,
+        conversacionId: conv.conversacion.id,
+        clienteId: conv.clienteId,
+        telefono: conv.clienteTelefono,
+        contactName: conv.clienteNombre ?? undefined,
+      },
+      "(El staff pidió una sugerencia de respuesta — no hay un mensaje nuevo de la clienta. Usa el historial " +
+        "reciente de esta conversación para redactar el siguiente mensaje que le mandaría el negocio.)",
+      { modo: "sugerir" },
+    );
+
+    return reply.send({ texto });
+  });
+
+  /**
+   * El panel necesita la misma lógica que la tool guardar_datos_contacto:
+   * si el teléfono ya es de otra clienta, no se puede simplemente
+   * sobreescribir (rompería el unique de clientes.telefono) — hay que
+   * fusionar, y eso requiere una transacción que no se puede hacer por RLS
+   * directo desde el navegador.
+   */
+  app.post("/admin/clientes/:id/telefono", async (request: FastifyRequest, reply: FastifyReply) => {
+    await requireStaff(request.headers.authorization);
+
+    const parsed = clienteTelefonoSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
+
+    const { id } = request.params as { id: string };
+    const cliente = await getClienteById(id);
+    if (!cliente) return reply.status(404).send({ error: "cliente_no_encontrado" });
+
+    const normalizado = normalizarTelefono(parsed.data.telefono);
+    if (!normalizado) return reply.status(400).send({ error: "telefono_invalido" });
+
+    const existente = await getClienteByTelefono(normalizado);
+    if (existente && existente.id !== id) {
+      if (!parsed.data.fusionar) {
+        return reply.status(409).send({ error: "telefono_en_uso", clienteExistente: { id: existente.id, nombre: existente.nombre } });
+      }
+      await fusionarClientes(id, existente.id);
+      logger.info({ origen: id, destino: existente.id }, "Clientas fusionadas desde el panel");
+      return reply.send({ clienteId: existente.id, fusionado: true });
+    }
+
+    await guardarTelefonoCliente(id, normalizado);
+    return reply.send({ clienteId: id, fusionado: false });
+  });
+
+  /**
+   * Estado de conexión de cada canal — la página "Canales" del panel (fase
+   * 5) lo usa para mostrar si Messenger/Instagram están de verdad
+   * funcionando, no solo si las variables de entorno están cargadas.
+   */
+  app.get("/admin/canales/estado", async (request: FastifyRequest, reply: FastifyReply) => {
+    await requireStaff(request.headers.authorization);
+
+    const meta = metaConfigurado ? await estadoConexion().catch(() => null) : null;
+
+    return reply.send({
+      whatsapp: { configurado: whatsappConfigurado, numero: env.WHATSAPP_PHONE_NUMBER_ID ?? null },
+      messenger: {
+        configurado: metaConfigurado,
+        pagina: meta?.pagina?.nombre ?? null,
+        suscrito: meta?.suscrita ?? false,
+        tokenVence: meta?.tokenVenceEn ?? null,
+      },
+      instagram: {
+        configurado: instagramConfigurado,
+        cuenta: meta?.instagram?.id ?? null,
+        username: meta?.instagram?.username ?? null,
+      },
+    });
+  });
+
+  /**
+   * Marca como visto en Messenger/Instagram cuando el staff abre la
+   * conversación. Puramente cosmético del lado de Meta (sender_action:
+   * mark_seen) — sin equivalente en WhatsApp con lo que ya está integrado,
+   * así que para ese canal no hace nada.
+   */
+  app.post("/admin/conversaciones/:id/visto", async (request: FastifyRequest, reply: FastifyReply) => {
+    await requireStaff(request.headers.authorization);
+
+    const { id } = request.params as { id: string };
+    const conv = await getConversacionConDestino(id);
+    if (!conv) return reply.status(404).send({ error: "conversacion_no_encontrada" });
+
+    if (conv.conversacion.canal !== "whatsapp" && conv.destinatarioId) {
+      await marcarVisto({ canal: conv.conversacion.canal as CanalMeta, recipientId: conv.destinatarioId }).catch(() => {});
+    }
+
+    return reply.status(204).send();
   });
 
   /**
@@ -136,7 +355,8 @@ export async function adminRoutes(app: FastifyInstance) {
    * Envío masivo de una plantilla (promociones). Siempre por plantilla
    * aprobada: una campaña sale casi siempre fuera de la ventana de 24h, y
    * mezclar los dos caminos haría que el resultado dependa de cuándo
-   * escribió cada clienta por última vez.
+   * escribió cada clienta por última vez. Solo WhatsApp: Messenger/Instagram
+   * no tienen un equivalente de plantilla fuera de ventana.
    */
   app.post("/admin/promociones", async (request: FastifyRequest, reply: FastifyReply) => {
     await requireStaff(request.headers.authorization);
