@@ -1,0 +1,21 @@
+{
+  "object": "page",
+  "entry": [
+    {
+      "id": "PAGE_ID_TEST",
+      "time": 1757332800000,
+      "changes": [
+        {
+          "field": "feed",
+          "value": {
+            "item": "comment",
+            "verb": "remove",
+            "comment_id": "comment_fb_1",
+            "post_id": "PAGE_ID_TEST_post_1",
+            "from": { "id": "USER_FB_1", "name": "Carmen Diaz" }
+          }
+        }
+      ]
+    }
+  ]
+}

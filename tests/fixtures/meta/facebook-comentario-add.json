@@ -1,0 +1,23 @@
+{
+  "object": "page",
+  "entry": [
+    {
+      "id": "PAGE_ID_TEST",
+      "time": 1757332800000,
+      "changes": [
+        {
+          "field": "feed",
+          "value": {
+            "item": "comment",
+            "verb": "add",
+            "comment_id": "comment_fb_1",
+            "post_id": "PAGE_ID_TEST_post_1",
+            "from": { "id": "USER_FB_1", "name": "Carmen Diaz" },
+            "message": "Cuánto cuesta el corte de cabello?",
+            "created_time": "2026-09-08T12:00:00+0000"
+          }
+        }
+      ]
+    }
+  ]
+}

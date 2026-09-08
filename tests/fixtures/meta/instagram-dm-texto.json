@@ -1,0 +1,20 @@
+{
+  "object": "instagram",
+  "entry": [
+    {
+      "id": "IG_ID_TEST",
+      "time": 1757332800000,
+      "messaging": [
+        {
+          "sender": { "id": "IGSID_ROSITA" },
+          "recipient": { "id": "IG_ID_TEST" },
+          "timestamp": 1757332800000,
+          "message": {
+            "mid": "mid.instagram.texto.1",
+            "text": "Vi el reel de la keratina, cuánto cuesta?"
+          }
+        }
+      ]
+    }
+  ]
+}

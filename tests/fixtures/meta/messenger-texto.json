@@ -1,0 +1,20 @@
+{
+  "object": "page",
+  "entry": [
+    {
+      "id": "PAGE_ID_TEST",
+      "time": 1757332800000,
+      "messaging": [
+        {
+          "sender": { "id": "PSID_ROSA" },
+          "recipient": { "id": "PAGE_ID_TEST" },
+          "timestamp": 1757332800000,
+          "message": {
+            "mid": "mid.messenger.texto.1",
+            "text": "Hola, hacen microblading?"
+          }
+        }
+      ]
+    }
+  ]
+}

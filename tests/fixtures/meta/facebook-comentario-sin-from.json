@@ -1,0 +1,22 @@
+{
+  "object": "page",
+  "entry": [
+    {
+      "id": "PAGE_ID_TEST",
+      "time": 1757332800000,
+      "changes": [
+        {
+          "field": "feed",
+          "value": {
+            "item": "comment",
+            "verb": "add",
+            "comment_id": "comment_fb_2",
+            "post_id": "PAGE_ID_TEST_post_1",
+            "message": "Comentario de un perfil restringido",
+            "created_time": "2026-09-08T12:00:00+0000"
+          }
+        }
+      ]
+    }
+  ]
+}
