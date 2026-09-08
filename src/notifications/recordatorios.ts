@@ -76,6 +76,14 @@ export async function enviarRecordatoriosPendientes(): Promise<void> {
   logger.info({ cantidad: pendientes.length }, "Citas pendientes de recordatorio");
 
   for (const cita of pendientes) {
+    // Una cita puede ser de una clienta que reservó por Instagram sin dejar
+    // su número. No hay recordatorio posible, pero tampoco es un fallo del
+    // barrido: se salta con log y las demás siguen.
+    if (!cita.clienteTelefono) {
+      logger.info({ citaId: cita.citaId }, "Cita de una clienta sin teléfono, no se puede recordar");
+      continue;
+    }
+
     const notificacion = await reservarNotificacion({
       clienteId: cita.clienteId,
       citaId: cita.citaId,

@@ -1,11 +1,15 @@
 import { supabase } from "../client.js";
 
+export type CanalOrigen = "whatsapp" | "messenger" | "instagram" | "web" | "manual";
+
 export type Cliente = {
   id: string;
-  telefono: string;
+  /** Null desde la 0017: un lead de Instagram no tiene número hasta que lo da. */
+  telefono: string | null;
   nombre: string | null;
   email: string | null;
   notas: string | null;
+  canal_origen: CanalOrigen;
   created_at: string;
   updated_at: string;
 };

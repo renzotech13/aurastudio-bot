@@ -2,7 +2,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { logger } from "../lib/logger.js";
-import { AppError } from "../lib/errors.js";
 import { requireStaff } from "../lib/adminAuth.js";
 import { getConversacionConCliente } from "../db/repositories/conversaciones.js";
 import { guardarMensaje } from "../db/repositories/mensajes.js";
@@ -74,7 +73,18 @@ export async function adminRoutes(app: FastifyInstance) {
     const found = await getConversacionConCliente(conversacionId);
     if (!found) return reply.status(404).send({ error: "conversacion_no_encontrada" });
 
-    if (!(await isWindowOpenFor(found.telefono))) {
+    // Hoy todas las conversaciones son de WhatsApp, así que siempre hay
+    // teléfono; la guarda existe porque la columna ya admite null desde la
+    // 0017 y esta ruta todavía no sabe enviar por Messenger ni Instagram.
+    const telefono = found.telefono;
+    if (!telefono) {
+      return reply.status(409).send({
+        error: "sin_telefono",
+        mensaje: "Esta clienta todavía no dio su número de WhatsApp, así que no se le puede escribir por acá.",
+      });
+    }
+
+    if (!(await isWindowOpenFor(telefono))) {
       // Meta rechaza el texto libre pasadas 24h del último mensaje del
       // cliente (error 131047). Se avisa explícito para que el panel pueda
       // ofrecer una plantilla en vez de fallar sin explicación.
@@ -87,14 +97,14 @@ export async function adminRoutes(app: FastifyInstance) {
 
     let mensaje;
     if (texto) {
-      const waMessageId = await sendText(found.telefono, texto);
+      const waMessageId = await sendText(telefono, texto);
       mensaje = await guardarMensaje({ conversacionId, rol: "humano", contenido: texto, waMessageId });
     } else {
       const plantilla = await getPlantillaById(plantillaId!);
       if (!plantilla) return reply.status(404).send({ error: "plantilla_no_encontrada" });
 
       const url = urlPublicaPlantilla(plantilla.storage_path);
-      const waMessageId = await sendMedia({ to: found.telefono, tipo: plantilla.tipo, link: url, caption: plantilla.caption });
+      const waMessageId = await sendMedia({ to: telefono, tipo: plantilla.tipo, link: url, caption: plantilla.caption });
       mensaje = await guardarMensaje({
         conversacionId,
         rol: "humano",
@@ -141,13 +151,20 @@ export async function adminRoutes(app: FastifyInstance) {
     const fallidas: { clienteId: string; motivo: string }[] = [];
 
     for (const clienteId of clienteIds) {
+      // Se resuelve la clienta ANTES de reservar la notificación: a una sin
+      // teléfono no hay campaña que mandarle (llegó por Instagram o Messenger
+      // y todavía no lo dio), y reservar primero dejaría una notificación
+      // colgada que ningún reintento va a poder completar.
+      const cliente = await getClienteById(clienteId);
+      if (!cliente?.telefono) {
+        logger.info({ clienteId }, "Clienta sin teléfono, se salta de la campaña");
+        continue;
+      }
+
       const notificacion = await reservarNotificacion({ clienteId, tipo: "promocion", plantilla });
       if (!notificacion) continue;
 
       try {
-        const cliente = await getClienteById(clienteId);
-        if (!cliente) throw new AppError("Cliente no encontrado", "cliente_no_encontrado", 404);
-
         await sendTemplate({
           to: cliente.telefono,
           plantilla,

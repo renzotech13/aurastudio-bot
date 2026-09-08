@@ -77,7 +77,8 @@ export async function listarCitasSinRecordatorio(horasAntes: number): Promise<
     citaId: string;
     clienteId: string;
     clienteNombre: string | null;
-    clienteTelefono: string;
+    /** Null si la clienta llegó por otro canal y todavía no dio su número. */
+    clienteTelefono: string | null;
     servicioNombre: string;
     inicioUtc: string;
   }[]
@@ -97,7 +98,7 @@ export async function listarCitasSinRecordatorio(horasAntes: number): Promise<
     id: string;
     cliente_id: string;
     inicio_utc: string;
-    clientes: { nombre: string | null; telefono: string };
+    clientes: { nombre: string | null; telefono: string | null };
     services: { name: string };
   }[];
   if (citas.length === 0) return [];

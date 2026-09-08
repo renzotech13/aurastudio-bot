@@ -6,7 +6,8 @@
 export type EventInput = {
   servicioNombre: string;
   clienteNombre: string | null;
-  clienteTelefono: string;
+  /** Null en una clienta que llegó por Instagram o Messenger y aún no dio su número. */
+  clienteTelefono: string | null;
   clienteEmail?: string | null;
   inicioUtc: Date;
   finUtc: Date;
@@ -23,7 +24,7 @@ export type EventBody = {
 
 export function buildEventBody(input: EventInput): EventBody {
   const nombre = input.clienteNombre?.trim() || "Cliente";
-  const descripcionLineas = [`Teléfono: ${input.clienteTelefono}`];
+  const descripcionLineas = [`Teléfono: ${input.clienteTelefono ?? "sin registrar"}`];
   if (input.notas) descripcionLineas.push(`Notas: ${input.notas}`);
 
   return {
