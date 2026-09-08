@@ -315,6 +315,11 @@ export async function adminRoutes(app: FastifyInstance) {
         cuenta: meta?.instagram?.id ?? null,
         username: meta?.instagram?.username ?? null,
       },
+      // No vive en ninguna tabla — es una aprobación de Meta a nivel de app,
+      // no un interruptor de negocio. El panel lo necesita para calcular el
+      // mismo aviso de ventana que ve el bot (meta/window.ts) ANTES de que
+      // el staff intente enviar, no solo después de que el bot lo rechace.
+      metaHumanAgentAprobado: env.META_HUMAN_AGENT_APROBADO,
     });
   });
 
