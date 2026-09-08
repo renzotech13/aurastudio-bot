@@ -49,6 +49,21 @@ export async function findOrCreateByPhone(telefono: string, nombre?: string): Pr
   return created as Cliente;
 }
 
+/**
+ * Un lead que llega por Messenger o Instagram: sin teléfono todavía, con
+ * `canal_origen` marcando por dónde entró. Lo usa meta/identidades.ts al
+ * resolver una identidad que nunca se había visto.
+ */
+export async function crearClienteLead(params: { nombre: string | null; canalOrigen: "messenger" | "instagram" }): Promise<Cliente> {
+  const { data, error } = await supabase
+    .from("clientes")
+    .insert({ nombre: params.nombre, canal_origen: params.canalOrigen })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as Cliente;
+}
+
 export async function guardarEmailCliente(clienteId: string, email: string): Promise<void> {
   const { error } = await supabase.from("clientes").update({ email }).eq("id", clienteId);
   if (error) throw error;

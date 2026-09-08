@@ -18,6 +18,20 @@ const envSchema = z.object({
 
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
 
+  // Messenger, Instagram y comentarios (bandeja omnicanal). Todas opcionales
+  // igual que WhatsApp: sin ellas los canales nuevos quedan apagados y el
+  // servicio arranca igual. META_APP_SECRET y META_VERIFY_TOKEN caen a los de
+  // WhatsApp si no se cargan — se asume que viven en la misma app de Meta.
+  META_GRAPH_VERSION: z.string().default("v26.0"),
+  META_APP_SECRET: z.string().min(1).optional(),
+  META_VERIFY_TOKEN: z.string().min(1).optional(),
+  META_PAGE_ID: z.string().min(1).optional(),
+  META_PAGE_ACCESS_TOKEN: z.string().min(1).optional(),
+  META_IG_ACCOUNT_ID: z.string().min(1).optional(),
+  // Entre 24h y 7 días de la última respuesta, solo un humano puede escribir
+  // con el tag HUMAN_AGENT — y solo si Meta aprobó esa función en App Review.
+  META_HUMAN_AGENT_APROBADO: z.coerce.boolean().default(false),
+
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
 
@@ -84,10 +98,18 @@ export const whatsappConfigurado = Boolean(
 export const anthropicConfigurado = Boolean(env.ANTHROPIC_API_KEY);
 export const googleCalendarConfigurado = Boolean(env.GOOGLE_SERVICE_ACCOUNT_JSON && env.GOOGLE_CALENDAR_ID);
 
+// Sin secreto propio, cae al de WhatsApp — la decisión de arquitectura es que
+// viven en la misma app de Meta (ver PROMPT-OMNICANAL.md §3.2).
+export const metaAppSecret = env.META_APP_SECRET ?? env.WHATSAPP_APP_SECRET;
+export const metaVerifyToken = env.META_VERIFY_TOKEN ?? env.WHATSAPP_VERIFY_TOKEN;
+export const metaConfigurado = Boolean(env.META_PAGE_ID && env.META_PAGE_ACCESS_TOKEN && metaAppSecret);
+export const instagramConfigurado = Boolean(metaConfigurado && env.META_IG_ACCOUNT_ID);
+
 const pendientes: string[] = [];
 if (!whatsappConfigurado) pendientes.push("WhatsApp (webhook y envío de mensajes)");
 if (!anthropicConfigurado) pendientes.push("Anthropic (agente conversacional)");
 if (!googleCalendarConfigurado) pendientes.push("Google Calendar (sincronización de citas)");
+if (!metaConfigurado) pendientes.push("Messenger/Instagram (webhook y envío de mensajes)");
 
 if (pendientes.length > 0) {
   console.warn(

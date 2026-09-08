@@ -2,7 +2,7 @@ import { supabase } from "../db/client.js";
 import { logger } from "../lib/logger.js";
 import { descargarMedia } from "../whatsapp/client.js";
 import { sendTextIfWindowOpen } from "../whatsapp/window.js";
-import { guardarMensaje, marcarWaMessageId } from "../db/repositories/mensajes.js";
+import { guardarMensaje, marcarExternalId } from "../db/repositories/mensajes.js";
 import { escalarConversacion } from "../db/repositories/conversaciones.js";
 import { getCitaPendienteDeComprobante, guardarComprobante } from "../db/repositories/citas.js";
 import { analizarComprobante } from "./paymentProof.js";
@@ -52,7 +52,7 @@ export async function handleImageMessage(
   if (!pendiente) {
     const guardado = await guardarMensaje({ conversacionId: conversacion.id, rol: "assistant", contenido: SIN_CITA_PENDIENTE });
     const waMessageId = await sendTextIfWindowOpen(message.from, SIN_CITA_PENDIENTE);
-    if (waMessageId) await marcarWaMessageId(guardado.id, waMessageId).catch(() => {});
+    if (waMessageId) await marcarExternalId(guardado.id, waMessageId).catch(() => {});
     return;
   }
 
@@ -103,5 +103,5 @@ export async function handleImageMessage(
 
   const guardado = await guardarMensaje({ conversacionId: conversacion.id, rol: "assistant", contenido: respuesta });
   const waMessageId = await sendTextIfWindowOpen(message.from, respuesta);
-  if (waMessageId) await marcarWaMessageId(guardado.id, waMessageId).catch(() => {});
+  if (waMessageId) await marcarExternalId(guardado.id, waMessageId).catch(() => {});
 }

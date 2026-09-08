@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "../config/env.js";
 import { logger } from "../lib/logger.js";
+import { verifyMetaSignature } from "../lib/metaSignature.js";
 import { parseInboundMessages, parseFailedStatuses, describeParsePayloadError } from "../whatsapp/parser.js";
 import { handleInboundMessage } from "../agent/handleMessage.js";
 import { marcarMensajeFallido } from "../db/repositories/mensajes.js";
@@ -20,20 +20,6 @@ function isDuplicate(messageId: string): boolean {
   if (seenMessageIds.has(messageId)) return true;
   seenMessageIds.set(messageId, now);
   return false;
-}
-
-function verifySignature(rawBody: Buffer, signatureHeader: string | undefined): boolean {
-  // Sin WHATSAPP_APP_SECRET no hay nada que verificar — y sin número de
-  // WhatsApp conectado, Meta nunca va a llamar a esta ruta de todos modos.
-  if (!env.WHATSAPP_APP_SECRET) return false;
-  if (!signatureHeader?.startsWith("sha256=")) return false;
-  const expected = createHmac("sha256", env.WHATSAPP_APP_SECRET).update(rawBody).digest("hex");
-  const provided = signatureHeader.slice("sha256=".length);
-
-  const expectedBuf = Buffer.from(expected, "hex");
-  const providedBuf = Buffer.from(provided, "hex");
-  if (expectedBuf.length !== providedBuf.length) return false;
-  return timingSafeEqual(expectedBuf, providedBuf);
 }
 
 async function processFailedStatuses(body: unknown): Promise<void> {
@@ -98,7 +84,7 @@ export async function webhookRoutes(app: FastifyInstance) {
     const signature = request.headers["x-hub-signature-256"] as string | undefined;
     const rawBody = request.rawBody;
 
-    if (!rawBody || !verifySignature(rawBody, signature)) {
+    if (!verifyMetaSignature(rawBody, signature, env.WHATSAPP_APP_SECRET)) {
       logger.warn("Firma de webhook inválida o ausente");
       return reply.status(401).send({ error: "invalid_signature" });
     }
