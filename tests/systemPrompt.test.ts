@@ -52,6 +52,13 @@ vi.mock("../src/db/repositories/services.js", () => ({
   ]),
 }));
 
+vi.mock("../src/db/repositories/sedes.js", () => ({
+  listActiveSedes: vi.fn().mockResolvedValue([
+    { id: "los-olivos", nombre: "Aura Studio — Los Olivos", direccion: "Av. Manuel González Prada 757, Urb. Good Year, Los Olivos, Lima", maps_url: null, telefono: null },
+    { id: "independencia", nombre: "Aura Studio — Mega", direccion: "C. 1 130, Independencia 15311", maps_url: null, telefono: null },
+  ]),
+}));
+
 vi.mock("../src/db/repositories/plantillasMedia.js", () => ({
   listActivePlantillas: vi.fn().mockResolvedValue([
     {
@@ -94,14 +101,22 @@ describe("buildSystemPrompt", () => {
   });
 
   // Los valores son los de Aura Studio: horario de la migración 0005 (todos
-  // los días 10:00–21:00) y la sede de Los Olivos. Este test venía heredado
-  // del negocio del que se clonó el bot y comprobaba SU horario y SU
-  // dirección, así que fallaba en rojo sin vigilar nada de Aura.
-  it("incluye horario, dirección y política de cancelación reales", async () => {
+  // los días 10:00–21:00). Este test venía heredado del negocio del que se
+  // clonó el bot y comprobaba SU horario y SU dirección, así que fallaba en
+  // rojo sin vigilar nada de Aura.
+  it("incluye horario y política de cancelación reales", async () => {
     const prompt = await buildSystemPrompt();
     expect(prompt).toContain("Todos los días, 10:00am–9:00pm.");
     expect(prompt).toContain("30 minutos de antelación");
+  });
+
+  // Antes había un ADDRESS fijo con solo Los Olivos: a una clienta de
+  // Independencia el bot le daba la dirección equivocada. Ahora tienen que
+  // aparecer las DOS.
+  it("incluye la dirección de las dos sedes, no solo una", async () => {
+    const prompt = await buildSystemPrompt();
     expect(prompt).toContain("Av. Manuel González Prada 757");
+    expect(prompt).toContain("C. 1 130, Independencia 15311");
   });
 
   it("incluye la regla dura de no inventar disponibilidad/precios", async () => {
@@ -121,5 +136,19 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("11111111-1111-1111-1111-111111111111");
     expect(prompt).toContain("Catálogo de precios");
     expect(prompt).toContain("Cuando pregunten por precios de todos los servicios juntos.");
+  });
+
+  it("por defecto (sin canal) arma el prompt de WhatsApp", async () => {
+    const prompt = await buildSystemPrompt();
+    expect(prompt).toContain("Le escribes por WhatsApp");
+  });
+
+  it("en Messenger/Instagram no ofrece coordinar el pago por ese mismo chat", async () => {
+    const promptMessenger = await buildSystemPrompt("messenger");
+    const promptInstagram = await buildSystemPrompt("instagram");
+    expect(promptMessenger).toContain("Le escribes por Messenger de Facebook");
+    expect(promptMessenger).toContain("guardar_datos_contacto");
+    expect(promptInstagram).toContain("Le escribes por Instagram");
+    expect(promptInstagram).toContain("guardar_datos_contacto");
   });
 });
