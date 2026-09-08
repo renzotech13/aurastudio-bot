@@ -2,7 +2,7 @@ import { env } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 import { isRateLimited } from "../lib/rateLimit.js";
 import { findOrCreateByPhone } from "../db/repositories/clientes.js";
-import { getOrCreateConversacionActiva, marcarUltimoMensaje, escalarConversacion } from "../db/repositories/conversaciones.js";
+import { getOrCreateConversacionAbierta, escalarConversacion } from "../db/repositories/conversaciones.js";
 import { guardarMensaje, marcarWaMessageId } from "../db/repositories/mensajes.js";
 import { sendTextIfWindowOpen } from "../whatsapp/window.js";
 import { runAgent, FALLBACK_MESSAGE } from "./runner.js";
@@ -49,7 +49,7 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
   }
 
   const cliente = await findOrCreateByPhone(message.from, message.contactName);
-  const conversacion = await getOrCreateConversacionActiva(cliente.id);
+  const conversacion = await getOrCreateConversacionAbierta({ clienteId: cliente.id, canal: "whatsapp" });
 
   if (conversacion.estado === "escalada") {
     // Un humano ya está atendiendo esta conversación; no interviene el bot.
@@ -76,18 +76,22 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
     return;
   }
 
+  // `ultimo_mensaje_at` lo mueve el trigger mensajes_actualiza_conversacion
+  // (migración 0017), no un UPDATE aparte: así el mensaje y la conversación
+  // avanzan en la misma transacción y vale igual para lo que escriba el panel.
   await guardarMensaje({
     conversacionId: conversacion.id,
     rol: "user",
     contenido: userText,
     waMessageId: message.id,
   });
-  await marcarUltimoMensaje(conversacion.id);
 
   let respuesta: string;
   try {
     respuesta = await runAgentWithTimeout(
-      { telefono: cliente.telefono, conversacionId: conversacion.id, contactName: message.contactName },
+      // El wa_id del remitente ES el teléfono, así que en WhatsApp nunca falta
+      // aunque la columna ya admita null para los leads de otros canales.
+      { telefono: cliente.telefono ?? message.from, conversacionId: conversacion.id, contactName: message.contactName },
       userText,
     );
   } catch (err) {
