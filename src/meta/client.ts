@@ -4,7 +4,7 @@ import { AppError } from "../lib/errors.js";
 import type { CanalMeta, AttachmentType } from "./parser.js";
 import type { ModoEnvioMeta } from "./window.js";
 
-const GRAPH_BASE_URL = `https://graph.facebook.com/${env.META_GRAPH_VERSION}`;
+export const GRAPH_BASE_URL = `https://graph.facebook.com/${env.META_GRAPH_VERSION}`;
 
 function tokenRequerido(): string {
   if (!env.META_PAGE_ACCESS_TOKEN) {

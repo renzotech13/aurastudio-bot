@@ -14,6 +14,7 @@ import { sincronizarCambiosCalendar, asegurarCanalWebhook } from "./calendar/pus
 import { enviarRecordatoriosPendientes } from "./notifications/recordatorios.js";
 import { metaConfigurado } from "./config/env.js";
 import { estadoConexion } from "./meta/client.js";
+import { barrerMetricasContenido } from "./meta/insights.js";
 import { actualizarEstadoCanal } from "./db/repositories/canales.js";
 
 const CALENDAR_RETRY_INTERVAL_MS = 5 * 60_000;
@@ -23,6 +24,9 @@ const RECORDATORIOS_INTERVAL_MS = 15 * 60_000;
 // desfase máximo acotado aunque se pierda algún aviso.
 const CALENDAR_SYNC_INTERVAL_MS = 5 * 60_000;
 const CALENDAR_WATCH_CHECK_INTERVAL_MS = 6 * 60 * 60_000;
+// Alcanza con unas pocas veces al día: la Insights API de Meta reporta por
+// día, no en vivo, así que correr más seguido no trae datos más frescos.
+const METRICAS_CONTENIDO_INTERVAL_MS = 6 * 60 * 60_000;
 
 const app = Fastify({ loggerInstance: logger, trustProxy: true });
 
@@ -132,4 +136,11 @@ if (metaConfigurado) {
       return Promise.all(escrituras);
     })
     .catch((err: unknown) => logger.error({ err }, "No se pudo consultar el estado inicial de conexión de Meta"));
+
+  barrerMetricasContenido().catch((err: unknown) => logger.error({ err }, "Falló el barrido inicial de métricas de contenido"));
+  setInterval(() => {
+    barrerMetricasContenido().catch((err: unknown) => {
+      logger.error({ err }, "Fallo el barrido periódico de métricas de contenido");
+    });
+  }, METRICAS_CONTENIDO_INTERVAL_MS);
 }
