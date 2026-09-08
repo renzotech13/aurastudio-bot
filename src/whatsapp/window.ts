@@ -15,16 +15,22 @@ export function isWithin24hWindow(lastInboundAt: Date | null, now = new Date()):
 }
 
 /**
- * Última vez que `telefono` le escribió al bot, sin crear nada si no
- * existe — a diferencia de findOrCreateByPhone(), esto es una consulta de
- * solo lectura (se usa también para ESCALATION_PHONE, que no es un
- * cliente real).
+ * Última vez que `telefono` le escribió al bot POR WHATSAPP, sin crear nada
+ * si no existe — a diferencia de findOrCreateByPhone(), esto es una consulta
+ * de solo lectura (se usa también para ESCALATION_PHONE, que no es un
+ * cliente real y por eso no se puede resolver por conversación).
+ *
+ * El filtro por canal no es cosmético: una misma clienta puede tener
+ * conversaciones de Messenger e Instagram, y sin él un DM de Instagram
+ * "abriría" la ventana de WhatsApp. El bot mandaría texto libre a un número
+ * que lleva días sin escribir y Meta lo rechazaría con el error 131047.
  */
 export async function getLastInboundAt(telefono: string): Promise<Date | null> {
   const { data, error } = await supabase
     .from("conversaciones")
     .select("ultimo_mensaje_at, clientes!inner(telefono)")
     .eq("clientes.telefono", telefono)
+    .eq("canal", "whatsapp")
     .order("ultimo_mensaje_at", { ascending: false })
     .limit(1)
     .maybeSingle();
