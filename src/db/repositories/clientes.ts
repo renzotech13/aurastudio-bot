@@ -69,6 +69,43 @@ export async function guardarEmailCliente(clienteId: string, email: string): Pro
   if (error) throw error;
 }
 
+export async function guardarNombreCliente(clienteId: string, nombre: string): Promise<void> {
+  const { error } = await supabase.from("clientes").update({ nombre }).eq("id", clienteId);
+  if (error) throw error;
+}
+
+/**
+ * Escribe el teléfono directo — quien llama ya tiene que haber confirmado
+ * que no pertenece a otra clienta (ver `getClienteByTelefono` + fusión en
+ * `guardar_datos_contacto` y en `POST /admin/clientes/:id/telefono`). El
+ * trigger `clientes_telefono_califica` de la 0017 hace el resto: si pasaba
+ * de null a un valor, las conversaciones abiertas de esta clienta suben a
+ * etapa 'calificado' solas.
+ */
+export async function guardarTelefonoCliente(clienteId: string, telefono: string): Promise<void> {
+  const { error } = await supabase.from("clientes").update({ telefono }).eq("id", clienteId);
+  if (error) throw error;
+}
+
+export async function getClienteByTelefono(telefono: string): Promise<Cliente | null> {
+  const { data, error } = await supabase.from("clientes").select("*").eq("telefono", telefono).maybeSingle();
+  if (error) throw error;
+  return data as Cliente | null;
+}
+
+/**
+ * `fusionar_clientes` (función SQL de la 0017) mueve identidades,
+ * conversaciones, citas, etiquetas, notificaciones y movimientos de caja del
+ * origen al destino en una sola transacción, y borra el origen. La función
+ * exige `is_staff()` solo cuando hay `auth.uid()` — el bot la llama con
+ * service role, sin sesión de usuario, y esa excepción está documentada en
+ * la propia migración justo para este caso.
+ */
+export async function fusionarClientes(origenId: string, destinoId: string): Promise<void> {
+  const { error } = await supabase.rpc("fusionar_clientes", { p_origen: origenId, p_destino: destinoId });
+  if (error) throw error;
+}
+
 export async function getClienteById(id: string): Promise<Cliente | null> {
   const { data, error } = await supabase.from("clientes").select("*").eq("id", id).maybeSingle();
   if (error) throw error;

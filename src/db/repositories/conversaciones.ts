@@ -102,22 +102,43 @@ export async function escalarConversacion(conversacionId: string): Promise<void>
   if (error) throw error;
 }
 
+export type ConversacionConDestino = {
+  conversacion: Conversacion;
+  /** El id al que hay que mandarle el mensaje: teléfono en WhatsApp, PSID/IGSID en Meta. */
+  destinatarioId: string | null;
+  clienteId: string;
+  clienteNombre: string | null;
+  clienteTelefono: string | null;
+};
+
 /**
- * Conversación + teléfono del cliente en una sola consulta. La usa el panel
- * admin al responder: necesita saber a qué número enviar sin hacer un
- * segundo viaje a clientes.
+ * Conversación + a quién hay que escribirle, en una sola consulta — la usa
+ * `/admin/mensajes` (multicanal) para no tener que resolver el destinatario
+ * distinto según el canal en cada llamada. `cliente_identidades.external_id`
+ * es la fuente real; el `?? clienteTelefono` es solo respaldo por si alguna
+ * conversación vieja quedara sin `identidad_id` (no debería, la 0017 la
+ * backfillea a todas).
  */
-export async function getConversacionConCliente(
-  conversacionId: string,
-): Promise<{ conversacion: Conversacion; telefono: string | null; clienteId: string } | null> {
+export async function getConversacionConDestino(conversacionId: string): Promise<ConversacionConDestino | null> {
   const { data, error } = await supabase
     .from("conversaciones")
-    .select("*, clientes!inner(id, telefono)")
+    .select("*, clientes!inner(id, nombre, telefono), cliente_identidades(external_id)")
     .eq("id", conversacionId)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
 
-  const { clientes, ...conversacion } = data as Conversacion & { clientes: { id: string; telefono: string | null } };
-  return { conversacion, telefono: clientes.telefono, clienteId: clientes.id };
+  const row = data as Conversacion & {
+    clientes: { id: string; nombre: string | null; telefono: string | null };
+    cliente_identidades: { external_id: string } | null;
+  };
+  const { clientes, cliente_identidades, ...conversacion } = row;
+
+  return {
+    conversacion: conversacion as Conversacion,
+    destinatarioId: cliente_identidades?.external_id ?? clientes.telefono,
+    clienteId: clientes.id,
+    clienteNombre: clientes.nombre,
+    clienteTelefono: clientes.telefono,
+  };
 }

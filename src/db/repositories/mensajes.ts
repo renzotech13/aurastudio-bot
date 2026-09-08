@@ -147,6 +147,12 @@ export async function existeExternalId(externalId: string): Promise<boolean> {
  * los dos es algo que la clienta haya visto o a lo que el bot deba "recordar"
  * haber dicho — Claude nunca los debe ver en el historial.
  */
+export async function getMensajeById(id: string): Promise<Mensaje | null> {
+  const { data, error } = await supabase.from("mensajes").select("*").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data as Mensaje | null;
+}
+
 export async function getHistorialReciente(
   conversacionId: string,
   maxMensajes = 20,
