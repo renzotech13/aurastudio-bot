@@ -183,6 +183,52 @@ real contra la base de datos.
 reales de producción en el `.env` del servidor, y **crear y aprobar en Meta
 la plantilla de recordatorio** (ver abajo).
 
+**Fase 11 (bandeja omnicanal: Messenger, Instagram y comentarios)** — completa:
+- `0017_omnicanal.sql` + `0018_metricas_contenido.sql` — `cliente_identidades`
+  (una clienta puede tener varias identidades: wa_id, PSID, IGSID, y una
+  distinta para comentarios), `canales` (interruptores y salud por canal),
+  `conversaciones`/`mensajes` ganan `canal`/`origen`/`etapa`/`asignada_a`
+  (el embudo comercial es un eje distinto de "quién responde"),
+  `eventos_conversacion` (auditoría), `respuestas_rapidas`, y
+  `metricas_contenido_diarias` (foto diaria de alcance/seguidores). Vista
+  `conversaciones_resumen` reescrita para traer identidad y canal.
+- `meta/{client,parser,window,identidades}.ts` + `routes/metaWebhook.ts` —
+  mismo patrón que `whatsapp/*`: firma validada, parser con zod, ventana de
+  24h (con `HUMAN_AGENT` para 24h-7 días, gateado por
+  `META_HUMAN_AGENT_APROBADO` — aprobación de App Review, no un interruptor
+  de negocio). `canales/` abstrae WhatsApp y Meta detrás de una sola
+  interfaz (`CanalAdapter`) que usa `agent/handleInbound.ts`.
+- `agent/handleComentario.ts` — comentario nuevo en una publicación abre una
+  conversación `origen='comentario'` separada del DM de esa misma persona
+  (son cosas distintas: un comentario es público, un DM no). Respuesta
+  privada automática opcional (`canales.ia_comentarios_activa`), siempre
+  apagada por defecto porque Meta solo permite **una** por comentario.
+- `/admin/comentarios/:id/responder` (público o privado),
+  `/admin/ia/sugerencia` (borrador que nunca se envía solo),
+  `/admin/clientes/:id/telefono` (con fusión si el número ya es de otra
+  clienta), `/admin/canales/estado`. Tool nueva del agente,
+  `guardar_datos_contacto`: cuando una clienta de Messenger/Instagram da su
+  teléfono, la fusiona con su registro de WhatsApp si ya existía uno.
+- Panel (`admin/src/pages/CRM/`): bandeja con filtros por canal/estado/etapa,
+  hilo con burbujas de nota/sistema/comentario, respuestas rápidas con
+  variables, sugerencia de IA, `useAvisosBandeja` (badge + toast +
+  notificación del navegador, opt-in), página **Canales** (interruptores +
+  respuestas rápidas) y **Métricas** (Atención vía `metricas_bandeja` RPC +
+  Contenido vía el barrido de abajo).
+- `meta/insights.ts` — barrido cada 6h que guarda alcance/interacciones
+  (Insights API) y seguidores (`followers_count`, un campo normal de cada
+  cuenta, no un metric de Insights) en `metricas_contenido_diarias`. **Ojo**:
+  la Insights API de Meta está en pleno recambio al escribir esto — varios
+  metrics usados acá no se pudieron confirmar contra la referencia oficial
+  completa; cada uno se pide por separado y uno rechazado no tumba los
+  demás (ver el comentario largo en el propio archivo).
+
+**Pendiente, fuera de código**: verificación de negocio de Meta para
+Messenger/Instagram (Business Verification, requisito para permisos más
+allá de modo tester); confirmar los nombres de metric de Insights contra un
+token real apenas esté aprobada; solicitar el permiso `Human Agent Tag` en
+App Review si se quiere responder por Meta pasadas las 24h.
+
 ## Plantillas de WhatsApp
 
 Fuera de la ventana de servicio de 24h de Meta, el texto libre se rechaza
