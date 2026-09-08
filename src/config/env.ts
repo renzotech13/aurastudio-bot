@@ -30,7 +30,17 @@ const envSchema = z.object({
   META_IG_ACCOUNT_ID: z.string().min(1).optional(),
   // Entre 24h y 7 días de la última respuesta, solo un humano puede escribir
   // con el tag HUMAN_AGENT — y solo si Meta aprobó esa función en App Review.
-  META_HUMAN_AGENT_APROBADO: z.coerce.boolean().default(false),
+  // OJO: `z.coerce.boolean()` usa el constructor Boolean() de JS por dentro,
+  // y Boolean("false") es `true` (cualquier string no vacío lo es) — con eso,
+  // esta variable quedaba SIEMPRE en true sin importar lo que dijera Railway.
+  // Encontrado probando el flujo de Human Agent contra un stack real, no en
+  // los tests unitarios (que mockean `env` directamente y nunca pasan por
+  // este parseo). Se compara el string tal cual contra "true".
+  META_HUMAN_AGENT_APROBADO: z
+    .string()
+    .optional()
+    .transform((v) => v === "true")
+    .default(false),
 
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
