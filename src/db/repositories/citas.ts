@@ -59,6 +59,19 @@ export async function crearCita(params: {
    */
   profesionalId?: string | null;
   sedeId?: string | null;
+  /**
+   * Salta la antelación mínima de MIN_LEAD_MINUTES. Es para el staff
+   * registrando a una clienta que llegó sin reservar: esa cita es para ahora
+   * mismo, o para hace un rato si se anota al terminar, y la política de
+   * anticipación existe para las clientas que reservan solas, no para
+   * recepción anotando lo que ya está pasando.
+   *
+   * El solapamiento SÍ se sigue validando: si la profesional está ocupada de
+   * verdad, no puede atender a dos personas a la vez por más que lo anote un
+   * humano.
+   */
+  omitirAntelacion?: boolean;
+  estado?: Cita["estado"];
 }): Promise<CrearCitaResult> {
   const desdeRango = new Date(params.inicioUtc.getTime() - 24 * 60 * 60_000);
   const hastaRango = new Date(params.finUtc.getTime() + 24 * 60 * 60_000);
@@ -83,7 +96,9 @@ export async function crearCita(params: {
     bloqueos,
     existingCitas: citasQueEstorban,
     bufferMinutes: BUFFER_MINUTES,
-    minLeadMinutes: MIN_LEAD_MINUTES,
+    // -Infinity y no 0: con 0 seguiría rechazando una hora ya pasada, y
+    // anotar al terminar el servicio es el caso normal de un walk-in.
+    minLeadMinutes: params.omitirAntelacion ? Number.NEGATIVE_INFINITY : MIN_LEAD_MINUTES,
     now: new Date(),
   });
   if (!check.available) {
@@ -101,6 +116,7 @@ export async function crearCita(params: {
       notas: params.notas ?? null,
       profesional_id: params.profesionalId ?? null,
       sede_id: params.sedeId ?? null,
+      ...(params.estado ? { estado: params.estado } : {}),
     })
     .select("*")
     .single();
@@ -226,6 +242,8 @@ export async function crearCitasConsecutivas(params: {
   /** Todos los servicios de una misma reserva van con la misma profesional. */
   profesionalId?: string | null;
   sedeId?: string | null;
+  omitirAntelacion?: boolean;
+  estado?: Cita["estado"];
 }): Promise<CrearCitasConsecutivasResult> {
   const citasCreadas: Cita[] = [];
   let cursor = params.inicioUtc;
@@ -251,6 +269,8 @@ export async function crearCitasConsecutivas(params: {
       ignorarCitaIds: citasCreadas.map((c) => c.id),
       profesionalId: params.profesionalId ?? null,
       sedeId: params.sedeId ?? null,
+      ...(params.omitirAntelacion ? { omitirAntelacion: true } : {}),
+      ...(params.estado ? { estado: params.estado } : {}),
       ...(params.notas ? { notas: params.notas } : {}),
     });
 

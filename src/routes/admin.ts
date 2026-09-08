@@ -6,9 +6,10 @@ import { AppError } from "../lib/errors.js";
 import { requireStaff } from "../lib/adminAuth.js";
 import { getConversacionConCliente } from "../db/repositories/conversaciones.js";
 import { guardarMensaje } from "../db/repositories/mensajes.js";
-import { getClienteById } from "../db/repositories/clientes.js";
+import { getClienteById, findOrCreateByPhone } from "../db/repositories/clientes.js";
 import { reservarNotificacion, marcarEnviada, marcarFallida } from "../db/repositories/notificaciones.js";
-import { actualizarEstadoCita } from "../db/repositories/citas.js";
+import { actualizarEstadoCita, crearCitasConsecutivas } from "../db/repositories/citas.js";
+import { getProfesionalEnSede } from "../db/repositories/profesionales.js";
 import { getBloqueoPorId, eliminarBloqueoPorId } from "../db/repositories/bloqueos.js";
 import { getPlantillaById, urlPublicaPlantilla } from "../db/repositories/plantillasMedia.js";
 import { deleteCalendarEvent } from "../calendar/google.js";
@@ -31,6 +32,22 @@ const promocionSchema = z.object({
   clienteIds: z.array(z.string().uuid()).min(1).max(200),
   plantilla: z.string().trim().min(1),
   parametros: z.array(z.string()).max(10).optional(),
+});
+
+const walkInSchema = z.object({
+  // Una de las dos: la clienta ya existe, o se crea con teléfono y nombre.
+  cliente_id: z.string().uuid().optional(),
+  telefono: z.string().trim().min(6).optional(),
+  nombre: z.string().trim().min(2).optional(),
+  servicio_ids: z.array(z.string()).min(1).max(10),
+  sede_id: z.string().min(1),
+  profesional_id: z.string().uuid(),
+  // ISO completo con zona; el panel lo arma desde la hora de Lima.
+  inicio: z.string().datetime({ offset: true }),
+  estado: z.enum(["confirmada", "completada"]).default("completada"),
+  comentario: z.string().trim().max(1000).optional(),
+}).refine((d) => Boolean(d.cliente_id) || Boolean(d.telefono), {
+  message: "Manda cliente_id, o telefono para crearla",
 });
 
 const citaEstadoSchema = z.object({
@@ -149,6 +166,54 @@ export async function adminRoutes(app: FastifyInstance) {
 
     logger.info({ enviadas, fallidas: fallidas.length, plantilla }, "Campaña de promoción procesada");
     return reply.send({ enviadas, fallidas });
+  });
+
+  /**
+   * Registrar a una clienta que llegó sin reservar.
+   *
+   * Va por el bot y no por un insert directo desde el navegador por dos
+   * razones: acá vive la validación de solapamiento (que sigue aplicando —
+   * una profesional no atiende a dos a la vez aunque lo anote recepción) y
+   * las credenciales de Google Calendar.
+   *
+   * `omitirAntelacion` es la diferencia con una reserva normal: la política
+   * de 2 horas de anticipación existe para quien reserva sola, no para
+   * recepción anotando lo que está pasando en este momento o acaba de pasar.
+   */
+  app.post("/admin/citas", async (request: FastifyRequest, reply: FastifyReply) => {
+    await requireStaff(request.headers.authorization);
+
+    const parsed = walkInSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
+    const body = parsed.data;
+
+    const cliente = body.cliente_id
+      ? await getClienteById(body.cliente_id)
+      : await findOrCreateByPhone(body.telefono!, body.nombre);
+    if (!cliente) return reply.status(404).send({ error: "cliente_no_encontrado" });
+
+    const prof = await getProfesionalEnSede(body.profesional_id, body.sede_id);
+    if (!prof) return reply.status(400).send({ error: "profesional_no_encontrada" });
+
+    const resultado = await crearCitasConsecutivas({
+      clienteId: cliente.id,
+      servicioIds: body.servicio_ids,
+      inicioUtc: new Date(body.inicio),
+      creadaPor: "humano",
+      profesionalId: prof.id,
+      sedeId: body.sede_id,
+      omitirAntelacion: true,
+      estado: body.estado,
+      ...(body.comentario ? { notas: body.comentario } : {}),
+    });
+
+    if (!resultado.ok) {
+      logger.warn({ reason: resultado.reason }, "Walk-in rechazado");
+      return reply.status(409).send({ error: resultado.reason, servicio_id_fallido: resultado.servicioIdFallido });
+    }
+
+    logger.info({ clienteId: cliente.id, cantidad: resultado.citas.length }, "Walk-in registrado desde el panel");
+    return reply.status(201).send({ citas: resultado.citas, cliente });
   });
 
   /**
