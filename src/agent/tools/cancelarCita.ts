@@ -22,6 +22,9 @@ export const cancelarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     required: ["cita_id"],
   },
   handler: async (input, ctx) => {
+    if (!ctx.telefono) {
+      return { ok: false, error: "sin_telefono", instruccion: "Pide a la clienta su número de WhatsApp para poder cancelar." };
+    }
     const result = await cancelarCita(input.cita_id, ctx.telefono, input.motivo);
     if (!result.ok) {
       return { ok: false, error: result.reason };

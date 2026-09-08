@@ -37,6 +37,13 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     required: ["servicio_id", "fecha", "hora"],
   },
   handler: async (input, ctx) => {
+    // Un lead de Instagram/Messenger sin teléfono todavía no puede agendar:
+    // la cita necesita un número real al que avisarle. Fase 3 agrega la tool
+    // guardar_datos_contacto para resolver esto sin salir del canal.
+    if (!ctx.telefono) {
+      return { ok: false, error: "sin_telefono", instruccion: "Pide a la clienta su número de WhatsApp antes de agendar." };
+    }
+
     const servicio = await getServiceById(input.servicio_id);
     if (!servicio || !servicio.duration_minutes) {
       return { ok: false, error: "servicio_no_encontrado" };

@@ -29,6 +29,9 @@ export const reagendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     required: ["cita_id", "fecha", "hora"],
   },
   handler: async (input, ctx) => {
+    if (!ctx.telefono) {
+      return { ok: false, error: "sin_telefono", instruccion: "Pide a la clienta su número de WhatsApp para poder reagendar." };
+    }
     const nuevoInicioUtc = timeStringToUtcDate(input.fecha, input.hora, BUSINESS_TIMEZONE);
 
     const result = await reagendarCita({

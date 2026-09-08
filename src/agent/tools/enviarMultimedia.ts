@@ -24,6 +24,14 @@ export const enviarMultimediaTool: AgentTool<z.infer<typeof inputSchema>> = {
     required: ["plantilla_id"],
   },
   handler: async (input, ctx) => {
+    // Hoy el envío de multimedia solo sale por WhatsApp — Messenger/Instagram
+    // todavía no tienen esa ruta cableada (queda para cuando el canal
+    // realmente lo necesite). Sin teléfono, esto es justamente un lead de
+    // otro canal: se le explica a Claude en vez de reventar.
+    if (!ctx.telefono) {
+      return { ok: false, error: "canal_no_soportado", instruccion: "Por este canal todavía no se puede mandar multimedia; ofrécele el enlace o cuéntaselo por texto." };
+    }
+
     const plantilla = await getPlantillaById(input.plantilla_id);
     if (!plantilla || !plantilla.activo) {
       return { ok: false, error: "plantilla_no_encontrada" };

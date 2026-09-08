@@ -13,6 +13,9 @@ export const consultarMisCitasTool: AgentTool<z.infer<typeof inputSchema>> = {
   inputSchema,
   jsonSchema: { type: "object", properties: {} },
   handler: async (_input, ctx) => {
+    if (!ctx.telefono) {
+      return { ok: false, error: "sin_telefono", instruccion: "Pide a la clienta su número de WhatsApp para poder buscar sus citas." };
+    }
     const citas = await listarCitasFuturasPorTelefono(ctx.telefono);
     const resultado = await Promise.all(
       citas.map(async (cita) => {

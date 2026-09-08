@@ -7,7 +7,12 @@ import type { z } from "zod";
  * aunque el modelo se equivoque o intente pasarlo distinto.
  */
 export type AgentContext = {
-  telefono: string;
+  /**
+   * Null en un lead de Instagram/Messenger que todavía no dio su número —
+   * las tools que operan citas lo necesitan y deben devolver un error
+   * instructivo en vez de asumir nada (ver el guard al inicio de cada una).
+   */
+  telefono: string | null;
   conversacionId: string;
   contactName: string | undefined;
 };

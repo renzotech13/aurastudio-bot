@@ -30,7 +30,7 @@ export const escalarAHumanoTool: AgentTool<z.infer<typeof inputSchema>> = {
     try {
       await sendTextIfWindowOpen(
         env.ESCALATION_PHONE,
-        `Conversación escalada. Cliente: ${ctx.contactName ?? "sin nombre"} (${ctx.telefono}). Motivo: ${input.motivo}`,
+        `Conversación escalada. Cliente: ${ctx.contactName ?? "sin nombre"} (${ctx.telefono ?? "sin teléfono"}). Motivo: ${input.motivo}`,
       );
     } catch (err) {
       // No dejamos que un fallo en la notificación tumbe la escalada en sí
