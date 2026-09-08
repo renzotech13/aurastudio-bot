@@ -1,5 +1,7 @@
 export type CanalActivo = "whatsapp" | "messenger" | "instagram";
 export type RolEnvio = "assistant" | "humano";
+/** Mismo shape que TipoMediaMensaje (db/repositories/mensajes.ts) y TipoMediaWhatsApp (whatsapp/client.ts). */
+export type TipoMediaCanal = "image" | "video" | "audio" | "document";
 
 export type ResultadoEnvioCanal = {
   /** external_id que asignó el canal, o null si la ventana estaba cerrada y no se intentó nada. */
@@ -22,6 +24,14 @@ export interface CanalAdapter {
     texto: string;
     rol: RolEnvio;
     /** Último mensaje ENTRANTE de esa persona por este canal; null si nunca escribió. */
+    ultimoMensajeAt: string | null;
+  }): Promise<ResultadoEnvioCanal>;
+  enviarMedia(params: {
+    destinatarioId: string;
+    tipo: TipoMediaCanal;
+    url: string;
+    caption?: string | null;
+    rol: RolEnvio;
     ultimoMensajeAt: string | null;
   }): Promise<ResultadoEnvioCanal>;
 }

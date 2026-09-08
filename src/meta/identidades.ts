@@ -46,7 +46,7 @@ export async function resolverIdentidad(params: {
   canal: CanalMeta;
   tipo: TipoIdentidad;
   externalId: string;
-  cuentaId: string;
+  cuentaId: string | null;
   nombreConocido?: string | null;
   usernameConocido?: string | null;
 }): Promise<{ cliente: Cliente; identidad: ClienteIdentidad }> {
@@ -125,7 +125,7 @@ export async function vincularIdentidadMensajeria(params: {
   canal: CanalMeta;
   tipo: "psid" | "igsid";
   externalId: string;
-  cuentaId: string;
+  cuentaId: string | null;
 }): Promise<ClienteIdentidad> {
   const existente = await buscarIdentidad(params.canal, params.tipo, params.externalId);
   if (existente) return existente;

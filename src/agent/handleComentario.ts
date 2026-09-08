@@ -3,6 +3,7 @@ import { resolverIdentidad, vincularIdentidadMensajeria } from "../meta/identida
 import { getOrCreateConversacionAbierta } from "../db/repositories/conversaciones.js";
 import { guardarMensaje, actualizarMetadataPorExternalId } from "../db/repositories/mensajes.js";
 import { getCanalConfig } from "../db/repositories/canales.js";
+import { registrarEvento } from "../db/repositories/eventos.js";
 import { responderComentarioPrivado } from "../meta/client.js";
 import type { CanalMeta, EventoMeta } from "../meta/parser.js";
 
@@ -113,6 +114,9 @@ export async function handleComentario(evento: EventoComentario): Promise<void> 
       contenido: "Respuesta privada enviada automáticamente.",
     });
     await actualizarMetadataPorExternalId(evento.externalId, { respondido_privado: true });
+    await registrarEvento(conversacion.id, "respuesta_privada", { comment_id: evento.externalId }).catch((err: unknown) =>
+      logger.error({ err }, "No se pudo registrar el evento de respuesta privada"),
+    );
   } catch (err) {
     // Un fallo acá no debe tumbar nada más: el comentario ya quedó guardado
     // arriba, solo no salió la respuesta privada automática.
