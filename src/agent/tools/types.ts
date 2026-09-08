@@ -7,13 +7,22 @@ import type { z } from "zod";
  * aunque el modelo se equivoque o intente pasarlo distinto.
  */
 export type AgentContext = {
+  canal: "whatsapp" | "messenger" | "instagram";
+  conversacionId: string;
+  /**
+   * Mutable a propósito: si `guardar_datos_contacto` descubre que el
+   * teléfono ya pertenece a otra clienta, fusiona las dos fichas y
+   * actualiza esto para que el resto del turno (las tools que se llamen
+   * después, en la misma pasada del loop) operen sobre la clienta correcta.
+   */
+  clienteId: string;
   /**
    * Null en un lead de Instagram/Messenger que todavía no dio su número —
    * las tools que operan citas lo necesitan y deben devolver un error
    * instructivo en vez de asumir nada (ver el guard al inicio de cada una).
+   * También mutable: `guardar_datos_contacto` lo rellena en caliente.
    */
   telefono: string | null;
-  conversacionId: string;
   contactName: string | undefined;
 };
 
@@ -35,4 +44,11 @@ export type AgentTool<TInput> = {
     required?: string[];
   };
   handler: (input: TInput, ctx: AgentContext) => Promise<unknown>;
+  /**
+   * true si la tool escribe algo (agendar, cancelar, escalar…). En modo
+   * `sugerir` (runner.ts) estas se excluyen de lo que Claude puede ver: una
+   * sugerencia de respuesta nunca debe poder agendar ni cancelar nada por sí
+   * sola. Sin esto (default false), la tool es de solo lectura.
+   */
+  mutates?: boolean;
 };

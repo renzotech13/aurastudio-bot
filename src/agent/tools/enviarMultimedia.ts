@@ -16,6 +16,7 @@ export const enviarMultimediaTool: AgentTool<z.infer<typeof inputSchema>> = {
     "un mensaje aparte — después de llamar a esta tool, puedes agregar un texto corto si aporta algo, pero no " +
     "es obligatorio, el caption del archivo ya suele bastar.",
   inputSchema,
+  mutates: true,
   jsonSchema: {
     type: "object",
     properties: {

@@ -13,6 +13,7 @@ export const cancelarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     "Cancela una cita del cliente que está escribiendo. Aplica siempre la política de cancelación (al menos " +
     "30 minutos de antelación) — si el cliente cancela fuera de plazo, explícaselo en vez de forzar la cancelación.",
   inputSchema,
+  mutates: true,
   jsonSchema: {
     type: "object",
     properties: {

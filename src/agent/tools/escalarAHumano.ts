@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AgentTool } from "./types.js";
 import { escalarConversacion } from "../../db/repositories/conversaciones.js";
+import { registrarEvento } from "../../db/repositories/eventos.js";
 import { sendTextIfWindowOpen } from "../../whatsapp/window.js";
 import { env } from "../../config/env.js";
 import { logger } from "../../lib/logger.js";
@@ -17,6 +18,7 @@ export const escalarAHumanoTool: AgentTool<z.infer<typeof inputSchema>> = {
     "cuando una tool falle y no puedas resolver la solicitud. Después de llamar esta tool, dile al cliente que " +
     "un asesor lo va a contactar — no sigas intentando resolverlo tú.",
   inputSchema,
+  mutates: true,
   jsonSchema: {
     type: "object",
     properties: {
@@ -27,10 +29,19 @@ export const escalarAHumanoTool: AgentTool<z.infer<typeof inputSchema>> = {
   handler: async (input, ctx) => {
     await escalarConversacion(ctx.conversacionId);
 
+    // Evento propio (distinto del `estado` genérico que ya inserta el
+    // trigger de la 0017 al cambiar a 'escalada'): es lo que el panel
+    // escucha en tiempo real para mostrar el toast de "conversación
+    // escalada", sin confundirlo con un cambio de estado cualquiera hecho
+    // a mano desde el switch del panel.
+    await registrarEvento(ctx.conversacionId, "escalada", { motivo: input.motivo, canal: ctx.canal }).catch((err: unknown) =>
+      logger.error({ err }, "No se pudo registrar el evento de escalada"),
+    );
+
     try {
       await sendTextIfWindowOpen(
         env.ESCALATION_PHONE,
-        `Conversación escalada. Cliente: ${ctx.contactName ?? "sin nombre"} (${ctx.telefono ?? "sin teléfono"}). Motivo: ${input.motivo}`,
+        `Conversación escalada (${ctx.canal}). Cliente: ${ctx.contactName ?? "sin nombre"} (${ctx.telefono ?? "sin teléfono"}). Motivo: ${input.motivo}`,
       );
     } catch (err) {
       // No dejamos que un fallo en la notificación tumbe la escalada en sí

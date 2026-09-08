@@ -65,7 +65,13 @@ export async function handleInbound(params: {
   let respuesta: string;
   try {
     respuesta = await runAgentWithTimeout(
-      { telefono: params.telefono, conversacionId: conversacion.id, contactName: params.contactName },
+      {
+        canal: params.canal,
+        conversacionId: conversacion.id,
+        clienteId: conversacion.cliente_id,
+        telefono: params.telefono,
+        contactName: params.contactName,
+      },
       params.texto,
     );
   } catch (err) {

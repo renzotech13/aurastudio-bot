@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { AgentTool } from "./types.js";
 import { getServiceById } from "../../db/repositories/services.js";
-import { findOrCreateByPhone, guardarEmailCliente } from "../../db/repositories/clientes.js";
+import { guardarEmailCliente, guardarNombreCliente } from "../../db/repositories/clientes.js";
 import { crearCita } from "../../db/repositories/citas.js";
 import { timeStringToUtcDate } from "../../lib/availability.js";
 import { BUSINESS_TIMEZONE } from "../../config/business.js";
@@ -25,6 +25,7 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     "ya del contexto de la conversación. correo_cliente es opcional: si la clienta lo da (por ejemplo porque " +
     "quiere la invitación en su Google Calendar), pásalo aquí; nunca lo pidas como requisito para agendar.",
   inputSchema,
+  mutates: true,
   jsonSchema: {
     type: "object",
     properties: {
@@ -38,10 +39,14 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
   },
   handler: async (input, ctx) => {
     // Un lead de Instagram/Messenger sin teléfono todavía no puede agendar:
-    // la cita necesita un número real al que avisarle. Fase 3 agrega la tool
+    // la cita necesita un número real al que avisarle. Usa
     // guardar_datos_contacto para resolver esto sin salir del canal.
     if (!ctx.telefono) {
-      return { ok: false, error: "sin_telefono", instruccion: "Pide a la clienta su número de WhatsApp antes de agendar." };
+      return {
+        ok: false,
+        error: "sin_telefono",
+        instruccion: "Pide a la clienta su número de WhatsApp (9 dígitos, Perú) y regístralo con guardar_datos_contacto antes de continuar.",
+      };
     }
 
     const servicio = await getServiceById(input.servicio_id);
@@ -49,16 +54,17 @@ export const agendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
       return { ok: false, error: "servicio_no_encontrado" };
     }
 
-    const cliente = await findOrCreateByPhone(ctx.telefono, input.nombre_cliente ?? ctx.contactName);
-    if (input.correo_cliente) {
-      await guardarEmailCliente(cliente.id, input.correo_cliente).catch(() => {});
-    }
+    // ctx.clienteId ya viene resuelto (por teléfono en WhatsApp, por
+    // identidad en Messenger/Instagram) — no hace falta volver a buscar por
+    // teléfono acá.
+    if (input.nombre_cliente) await guardarNombreCliente(ctx.clienteId, input.nombre_cliente).catch(() => {});
+    if (input.correo_cliente) await guardarEmailCliente(ctx.clienteId, input.correo_cliente).catch(() => {});
 
     const inicioUtc = timeStringToUtcDate(input.fecha, input.hora, BUSINESS_TIMEZONE);
     const finUtc = new Date(inicioUtc.getTime() + servicio.duration_minutes * 60_000);
 
     const result = await crearCita({
-      clienteId: cliente.id,
+      clienteId: ctx.clienteId,
       servicioId: servicio.id,
       inicioUtc,
       finUtc,

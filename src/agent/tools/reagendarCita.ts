@@ -19,6 +19,7 @@ export const reagendarCitaTool: AgentTool<z.infer<typeof inputSchema>> = {
     "Mueve una cita existente del cliente a un nuevo horario (debe venir de consultar_disponibilidad, con el " +
     "mismo servicio de la cita original). Solo funciona sobre citas del propio cliente que está escribiendo.",
   inputSchema,
+  mutates: true,
   jsonSchema: {
     type: "object",
     properties: {

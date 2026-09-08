@@ -8,6 +8,7 @@ import { reagendarCitaTool } from "./reagendarCita.js";
 import { cancelarCitaTool } from "./cancelarCita.js";
 import { escalarAHumanoTool } from "./escalarAHumano.js";
 import { enviarMultimediaTool } from "./enviarMultimedia.js";
+import { guardarDatosContactoTool } from "./guardarDatosContacto.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ALL_TOOLS: AgentTool<any>[] = [
@@ -19,10 +20,20 @@ const ALL_TOOLS: AgentTool<any>[] = [
   cancelarCitaTool,
   escalarAHumanoTool,
   enviarMultimediaTool,
+  guardarDatosContactoTool,
 ];
 
-export function getToolDefinitions(): Anthropic.Tool[] {
-  return ALL_TOOLS.map((tool) => ({
+export type ModoAgente = "responder" | "sugerir";
+
+/**
+ * En modo "sugerir" (borrador para que el staff revise) las tools que
+ * escriben algo ni siquiera se le muestran a Claude — no es que confiemos
+ * en que no las llame, es que físicamente no puede: no están en la lista
+ * que ve.
+ */
+export function getToolDefinitions(modo: ModoAgente = "responder"): Anthropic.Tool[] {
+  const tools = modo === "sugerir" ? ALL_TOOLS.filter((t) => !t.mutates) : ALL_TOOLS;
+  return tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
     input_schema: tool.jsonSchema,
