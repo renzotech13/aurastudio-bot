@@ -1,7 +1,7 @@
 import { getBusinessHours } from "../db/repositories/businessHours.js";
 import { getBloqueosEnRango } from "../db/repositories/bloqueos.js";
 import { supabase } from "../db/client.js";
-import { citasQueOcupanA, getAvailableSlots, getLocalWeekdayAndTime, isSlotAvailable, timeStringToUtcDate } from "./availability.js";
+import { atiendeEl, citasQueOcupanA, getAvailableSlots, getLocalWeekdayAndTime, isSlotAvailable, timeStringToUtcDate } from "./availability.js";
 import { BUFFER_MINUTES, MIN_LEAD_MINUTES, SLOT_STEP_MINUTES, BUSINESS_TIMEZONE } from "../config/business.js";
 
 const MAX_DIAS = 14;
@@ -23,14 +23,16 @@ export async function consultarDisponibilidadReal(params: {
   fechaDesde: string;
   fechaHasta: string;
   /**
-   * Profesionales candidatas. Una sola cuando la clienta eligió a alguien;
-   * varias cuando eligió "cualquier profesional" (entonces una hora está
-   * libre si la puede tomar AL MENOS UNA de ellas, y se decide cuál recién
-   * al reservar). Vacío o ausente = agenda del local entera, que es como se
-   * comportaba antes de la migración 0014 y es lo que sigue usando el bot
-   * de WhatsApp mientras no pregunte por sede.
+   * Profesionales candidatas, con los días que atienden en la sede pedida
+   * (vacío = todos). Una sola cuando la clienta eligió a alguien; varias
+   * cuando eligió "cualquier profesional" — entonces una hora está libre si
+   * la puede tomar AL MENOS UNA, y se decide cuál recién al reservar.
+   *
+   * Vacío o ausente = agenda del local entera, que es como se comportaba
+   * antes de la 0014 y lo que sigue usando el bot de WhatsApp mientras no
+   * pregunte por sede.
    */
-  profesionalIds?: string[];
+  candidatas?: { id: string; dias: number[] }[];
 }): Promise<{ fecha: string; horas: string[] }[]> {
   const fechaHasta = params.fechaHasta < params.fechaDesde ? params.fechaDesde : params.fechaHasta;
   const dias: string[] = [];
@@ -60,12 +62,18 @@ export async function consultarDisponibilidadReal(params: {
   ]);
 
   const now = new Date();
-  // Sin candidatas, una sola pasada contra la agenda del local (comportamiento
-  // anterior a la 0014). Con candidatas, una pasada por persona: cada una ve
-  // sólo lo que a ella la ocupa.
-  const agendas: (string | null)[] = params.profesionalIds?.length ? params.profesionalIds : [null];
 
   return dias.map((fechaLocal) => {
+    // Quién trabaja ESE día de la semana en esa sede. Una profesional que
+    // solo va los lunes no debe aportar horarios el resto de la semana.
+    const weekday = new Date(`${fechaLocal}T00:00:00Z`).getUTCDay();
+    const delDia = (params.candidatas ?? []).filter((c) => atiendeEl(c, weekday));
+
+    // Sin candidatas, una sola pasada contra la agenda del local
+    // (comportamiento anterior a la 0014). Con candidatas, una pasada por
+    // persona: cada una ve sólo lo que a ella la ocupa.
+    const agendas: (string | null)[] = params.candidatas?.length ? delDia.map((c) => c.id) : [null];
+
     const horas = new Set<string>();
     for (const profesionalId of agendas) {
       const slots = getAvailableSlots({
@@ -93,7 +101,7 @@ export async function consultarDisponibilidadReal(params: {
  * la cita nunca se guarda sin profesional (ver migración 0014).
  */
 export async function elegirProfesionalLibre(params: {
-  profesionalIds: string[];
+  candidatas: { id: string; dias: number[] }[];
   inicioUtc: Date;
   finUtc: Date;
 }): Promise<string | null> {
@@ -119,7 +127,13 @@ export async function elegirProfesionalLibre(params: {
   ]);
 
   const now = new Date();
-  for (const profesionalId of params.profesionalIds) {
+  // El día de la semana se mira en hora de Lima, no en UTC: una cita del
+  // lunes a las 20:00 de Lima cae en martes UTC, y con getUTCDay() se le
+  // asignaría el día equivocado.
+  const weekdayLocal = getLocalWeekdayAndTime(params.inicioUtc, BUSINESS_TIMEZONE).weekday;
+  const elegibles = params.candidatas.filter((c) => atiendeEl(c, weekdayLocal));
+
+  for (const { id: profesionalId } of elegibles) {
     const check = isSlotAvailable({
       inicioUtc: params.inicioUtc,
       finUtc: params.finUtc,

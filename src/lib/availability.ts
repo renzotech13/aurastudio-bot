@@ -20,6 +20,20 @@ export type Bloqueo = { inicioUtc: Date; finUtc: Date };
 export type ExistingCita = { inicioUtc: Date; finUtc: Date; id?: string; profesionalId?: string | null };
 
 /**
+ * ¿Atiende esta profesional ese día de la semana (0=domingo … 6=sábado)?
+ *
+ * Vive acá y no en el repositorio de profesionales a propósito: es lógica
+ * pura, y este módulo no importa la base ni la configuración — así se puede
+ * testear sin levantar el entorno entero.
+ *
+ * Arreglo vacío = todos los días. Es el default al sembrar (migración 0016),
+ * así que quien no rota no tiene que cargar nada.
+ */
+export function atiendeEl(profesional: { dias: number[] }, weekday: number): boolean {
+  return profesional.dias.length === 0 || profesional.dias.includes(weekday);
+}
+
+/**
  * Qué citas le estorban a una profesional concreta.
  *
  * Una cita con `profesionalId` null ocupa a TODAS: son las citas anteriores a

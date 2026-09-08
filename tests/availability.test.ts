@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  atiendeEl,
   citasQueOcupanA,
   getAvailableSlots,
   getLocalWeekdayAndTime,
@@ -257,3 +258,29 @@ describe("timeStringToUtcDate en el cambio de día", () => {
       .toBe("2026-09-07T19:30:00.000Z");
   });
 });
+
+/**
+ * Rotación entre sedes (migración 0016): una profesional que solo va los
+ * lunes a Mega no debe aportar horarios el resto de la semana en esa sede.
+ */
+describe("atiendeEl", () => {
+  it("sin días cargados atiende cualquier día", () => {
+    // Vacío = todos los días. Es el default al sembrar, así que si esto
+    // fallara, todo el equipo que no rota se quedaría sin agenda.
+    for (let d = 0; d <= 6; d++) expect(atiendeEl({ dias: [] }, d)).toBe(true);
+  });
+
+  it("con días cargados solo atiende esos", () => {
+    const soloLunes = { dias: [1] };
+    expect(atiendeEl(soloLunes, 1)).toBe(true);
+    expect(atiendeEl(soloLunes, 2)).toBe(false);
+    expect(atiendeEl(soloLunes, 0)).toBe(false);
+  });
+
+  it("acepta varios días sueltos", () => {
+    const lunesYMartes = { dias: [1, 2] };
+    expect(atiendeEl(lunesYMartes, 1)).toBe(true);
+    expect(atiendeEl(lunesYMartes, 2)).toBe(true);
+    expect(atiendeEl(lunesYMartes, 3)).toBe(false);
+  });
+})

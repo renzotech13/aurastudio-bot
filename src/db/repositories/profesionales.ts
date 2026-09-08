@@ -15,6 +15,11 @@ export type Profesional = {
   sede_id: string;
   rol: string;
   foto_url: string | null;
+  /**
+   * Días en que atiende en la sede consultada: 0=domingo … 6=sábado.
+   * Vacío = todos los días que el local abra (ver migración 0016).
+   */
+  dias: number[];
 };
 
 export async function listarSedes(): Promise<Sede[]> {
@@ -42,10 +47,24 @@ export async function listarProfesionalesParaServicios(params: {
 }): Promise<Profesional[]> {
   if (params.servicioIds.length === 0) return [];
 
+  // Dónde atiende cada una sale de profesional_sedes, no de
+  // profesionales.sede_id: desde la 0016 una misma persona puede estar en
+  // varias sedes, y sede_id quedó solo como "sede principal" para agrupar.
+  const { data: enLaSede, error: errSedes } = await supabase
+    .from("profesional_sedes")
+    .select("profesional_id,dias")
+    .eq("sede_id", params.sedeId);
+  if (errSedes) throw errSedes;
+  if (!enLaSede?.length) return [];
+
+  const diasPorProfesional = new Map<string, number[]>(
+    enLaSede.map((f) => [f.profesional_id as string, (f.dias as number[] | null) ?? []]),
+  );
+
   const { data: candidatas, error: errProf } = await supabase
     .from("profesionales")
     .select("id,slug,nombre,sede_id,rol,foto_url")
-    .eq("sede_id", params.sedeId)
+    .in("id", [...diasPorProfesional.keys()])
     .eq("activa", true)
     .order("sort_order");
   if (errProf) throw errProf;
@@ -67,17 +86,33 @@ export async function listarProfesionalesParaServicios(params: {
   }
 
   const pedidos = new Set(params.servicioIds);
-  return (candidatas as Profesional[]).filter((p) => cuenta.get(p.id)?.size === pedidos.size);
+  return (candidatas as Omit<Profesional, "dias">[])
+    .filter((p) => cuenta.get(p.id)?.size === pedidos.size)
+    .map((p) => ({ ...p, dias: diasPorProfesional.get(p.id) ?? [] }));
 }
 
-/** Una profesional concreta, para validar lo que llega del formulario web. */
-export async function getProfesionalById(id: string): Promise<Profesional | null> {
-  const { data, error } = await supabase
-    .from("profesionales")
-    .select("id,slug,nombre,sede_id,rol,foto_url")
-    .eq("id", id)
-    .eq("activa", true)
-    .maybeSingle();
-  if (error) throw error;
-  return (data as Profesional) ?? null;
+/**
+ * Una profesional concreta, para validar lo que llega del formulario web.
+ * `sedeId` es obligatorio porque desde la 0016 "existe" no basta: hay que
+ * confirmar que atiende en ESA sede, y con qué días.
+ */
+export async function getProfesionalEnSede(id: string, sedeId: string): Promise<Profesional | null> {
+  const [{ data: prof, error: errProf }, { data: enSede, error: errSede }] = await Promise.all([
+    supabase
+      .from("profesionales")
+      .select("id,slug,nombre,sede_id,rol,foto_url")
+      .eq("id", id)
+      .eq("activa", true)
+      .maybeSingle(),
+    supabase
+      .from("profesional_sedes")
+      .select("dias")
+      .eq("profesional_id", id)
+      .eq("sede_id", sedeId)
+      .maybeSingle(),
+  ]);
+  if (errProf) throw errProf;
+  if (errSede) throw errSede;
+  if (!prof || !enSede) return null;
+  return { ...(prof as Omit<Profesional, "dias">), dias: (enSede.dias as number[] | null) ?? [] };
 }

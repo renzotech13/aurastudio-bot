@@ -8,7 +8,7 @@ import { getServiceById } from "../db/repositories/services.js";
 import { findOrCreateByPhone } from "../db/repositories/clientes.js";
 import { crearCitasConsecutivas } from "../db/repositories/citas.js";
 import {
-  getProfesionalById,
+  getProfesionalEnSede,
   listarProfesionalesParaServicios,
   listarSedes,
 } from "../db/repositories/profesionales.js";
@@ -84,20 +84,23 @@ export async function publicRoutes(app: FastifyInstance) {
     // Quiénes pueden atender esto. Si la clienta eligió profesional, es una
     // sola; si eligió "cualquiera", son todas las de la sede que hagan los
     // servicios pedidos y la hora se ofrece si alguna la tiene libre.
-    let profesionalIds: string[] = [];
+    let candidatas: { id: string; dias: number[] }[] = [];
     if (parsed.data.profesional_id) {
-      const prof = await getProfesionalById(parsed.data.profesional_id);
+      // Sin sede no se puede validar a una profesional concreta: desde la
+      // 0016 los días que atiende dependen de en qué local se la reserve.
+      if (!parsed.data.sede_id) return reply.status(400).send({ error: "falta_sede" });
+      const prof = await getProfesionalEnSede(parsed.data.profesional_id, parsed.data.sede_id);
       if (!prof) return reply.status(400).send({ error: "profesional_no_encontrada" });
-      profesionalIds = [prof.id];
+      candidatas = [{ id: prof.id, dias: prof.dias }];
     } else if (parsed.data.sede_id) {
       const equipo = await listarProfesionalesParaServicios({
         sedeId: parsed.data.sede_id,
         servicioIds,
       });
-      profesionalIds = equipo.map((p) => p.id);
+      candidatas = equipo.map((p) => ({ id: p.id, dias: p.dias }));
       // Nadie en esa sede hace ese combo: no hay horas, y decirlo con una
       // lista vacía es más honesto que devolver la agenda del local entero.
-      if (profesionalIds.length === 0) {
+      if (candidatas.length === 0) {
         return reply.send([]);
       }
     }
@@ -106,7 +109,7 @@ export async function publicRoutes(app: FastifyInstance) {
       duracionMinutos: duracionTotal,
       fechaDesde: parsed.data.fecha_desde,
       fechaHasta,
-      profesionalIds,
+      candidatas,
     });
     return reply.send(disponibilidad);
   });
@@ -131,7 +134,7 @@ export async function publicRoutes(app: FastifyInstance) {
       servicioIds: parsed.data.servicio_ids.split(",").filter(Boolean),
     });
     return reply.send(
-      equipo.map((p) => ({ id: p.id, nombre: p.nombre, rol: p.rol, foto_url: p.foto_url })),
+      equipo.map((p) => ({ id: p.id, nombre: p.nombre, rol: p.rol, foto_url: p.foto_url, dias: p.dias })),
     );
   });
 
@@ -198,8 +201,8 @@ export async function publicRoutes(app: FastifyInstance) {
 
     let profesionalId: string | null = null;
     if (body.profesional_id) {
-      const prof = await getProfesionalById(body.profesional_id);
-      if (!prof || prof.sede_id !== sedeId) {
+      const prof = await getProfesionalEnSede(body.profesional_id, sedeId);
+      if (!prof) {
         return reply.status(400).send({ error: "profesional_no_encontrada" });
       }
       profesionalId = prof.id;
@@ -209,7 +212,7 @@ export async function publicRoutes(app: FastifyInstance) {
         servicioIds: body.servicio_ids,
       });
       profesionalId = await elegirProfesionalLibre({
-        profesionalIds: equipo.map((p) => p.id),
+        candidatas: equipo.map((p) => ({ id: p.id, dias: p.dias })),
         inicioUtc,
         finUtc,
       });
