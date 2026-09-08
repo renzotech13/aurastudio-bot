@@ -7,7 +7,9 @@ import { env } from "../config/env.js";
 const baseOptions: LoggerOptions = {
   level: env.LOG_LEVEL,
   redact: {
-    paths: ["phone", "*.phone", "*.*.phone", "to", "from"],
+    // recipientId/remitenteId/psid/igsid: identificadores personales de Meta
+    // aunque no sean teléfonos — mismo criterio que phone/to/from.
+    paths: ["phone", "*.phone", "*.*.phone", "to", "from", "recipientId", "*.recipientId", "remitenteId", "*.remitenteId", "psid", "igsid"],
     censor: (value) => maskPhone(String(value)),
   },
 };

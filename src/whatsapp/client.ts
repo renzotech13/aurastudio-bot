@@ -2,8 +2,9 @@ import { env } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 import { AppError } from "../lib/errors.js";
 
-const GRAPH_API_VERSION = "v21.0";
-const GRAPH_BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
+// v21.0 estaba fijo acá y esa versión caduca el 21-ene-2027 — ahora comparte
+// la misma variable que Messenger/Instagram (META_GRAPH_VERSION).
+const GRAPH_BASE_URL = `https://graph.facebook.com/${env.META_GRAPH_VERSION}`;
 
 /**
  * Devuelve el wa_message_id que Meta asigna al aceptar el envío. Ese

@@ -5,12 +5,16 @@ import { logger } from "./lib/logger.js";
 import { AppError } from "./lib/errors.js";
 import { healthRoutes } from "./routes/health.js";
 import { webhookRoutes } from "./routes/webhook.js";
+import { metaWebhookRoutes } from "./routes/metaWebhook.js";
 import { adminRoutes } from "./routes/admin.js";
 import { publicRoutes } from "./routes/public.js";
 import { calendarWebhookRoutes } from "./routes/calendarWebhook.js";
 import { syncPendingCitas } from "./calendar/retrySync.js";
 import { sincronizarCambiosCalendar, asegurarCanalWebhook } from "./calendar/pushSync.js";
 import { enviarRecordatoriosPendientes } from "./notifications/recordatorios.js";
+import { metaConfigurado } from "./config/env.js";
+import { estadoConexion } from "./meta/client.js";
+import { actualizarEstadoCanal } from "./db/repositories/canales.js";
 
 const CALENDAR_RETRY_INTERVAL_MS = 5 * 60_000;
 const RECORDATORIOS_INTERVAL_MS = 15 * 60_000;
@@ -52,6 +56,7 @@ await app.register(cors, {
 
 await app.register(healthRoutes);
 await app.register(webhookRoutes);
+await app.register(metaWebhookRoutes);
 await app.register(adminRoutes);
 await app.register(publicRoutes);
 await app.register(calendarWebhookRoutes);
@@ -108,3 +113,23 @@ setInterval(() => {
     logger.error({ err }, "Fallo la renovación del canal de webhooks de Google Calendar");
   });
 }, CALENDAR_WATCH_CHECK_INTERVAL_MS);
+
+// Igual que Calendar: sin bloquear el arranque. Rellena canales.cuenta_id /
+// cuenta_nombre para que el panel (fase 5) no tenga que resolverlo aparte.
+if (metaConfigurado) {
+  estadoConexion()
+    .then((estado) => {
+      if (!estado) return;
+      const escrituras: Promise<void>[] = [];
+      if (estado.pagina) {
+        escrituras.push(actualizarEstadoCanal("messenger", { cuentaId: estado.pagina.id, cuentaNombre: estado.pagina.nombre ?? undefined }));
+      }
+      if (estado.instagram) {
+        escrituras.push(
+          actualizarEstadoCanal("instagram", { cuentaId: estado.instagram.id, cuentaNombre: estado.instagram.username ?? undefined }),
+        );
+      }
+      return Promise.all(escrituras);
+    })
+    .catch((err: unknown) => logger.error({ err }, "No se pudo consultar el estado inicial de conexión de Meta"));
+}
