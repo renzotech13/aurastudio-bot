@@ -55,6 +55,8 @@ export async function guardarMensaje(params: {
   mediaPath?: string;
   mediaType?: TipoMediaMensaje;
   metadata?: MensajeMetadata;
+  /** Se guarda junto con el mensaje cuando ya se sabe, al momento de insertarlo, que el envío falló o no se intentó. */
+  errorEntrega?: string;
 }): Promise<Mensaje> {
   const { data, error } = await supabase
     .from("mensajes")
@@ -70,6 +72,7 @@ export async function guardarMensaje(params: {
       media_url: params.mediaUrl ?? null,
       media_path: params.mediaPath ?? null,
       media_type: params.mediaType ?? null,
+      error_entrega: params.errorEntrega?.slice(0, 500) ?? null,
       ...(params.metadata ? { metadata: params.metadata } : {}),
     })
     .select("*")

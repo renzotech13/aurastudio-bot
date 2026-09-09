@@ -1,6 +1,6 @@
 import { logger } from "../lib/logger.js";
 import { escalarConversacion, type Conversacion } from "../db/repositories/conversaciones.js";
-import { guardarMensaje, marcarExternalId } from "../db/repositories/mensajes.js";
+import { guardarMensaje } from "../db/repositories/mensajes.js";
 import { getCanalConfig } from "../db/repositories/canales.js";
 import { getCanalAdapter, type CanalActivo } from "../canales/index.js";
 import { runAgent, FALLBACK_MESSAGE } from "./runner.js";
@@ -80,21 +80,36 @@ export async function handleInbound(params: {
     await escalarConversacion(conversacion.id).catch(() => {});
   }
 
-  const guardado = await guardarMensaje({ conversacionId: conversacion.id, rol: "assistant", contenido: respuesta });
-
+  // Enviar antes de guardar: si esto tira (Meta/WhatsApp rechazó el envío,
+  // no solo "ventana cerrada"), el catch lo convierte en el mismo shape que
+  // motivoCierre para que el mensaje quede guardado con error_entrega en vez
+  // de aparecer en el panel como si le hubiera llegado a la clienta.
   const adapter = getCanalAdapter(params.canal);
-  const resultado = await adapter.enviarTexto({
-    destinatarioId: params.destinatarioId,
-    texto: respuesta,
+  let resultado: { externalId: string | null; motivoCierre?: string };
+  try {
+    resultado = await adapter.enviarTexto({
+      destinatarioId: params.destinatarioId,
+      texto: respuesta,
+      rol: "assistant",
+      // El mensaje que se está respondiendo ES el último entrante: la ventana
+      // está abierta por definición en este momento, no hace falta releerla.
+      ultimoMensajeAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    logger.error({ err, canal: params.canal, conversacionId: conversacion.id }, "Fallo enviando la respuesta del bot");
+    resultado = { externalId: null, motivoCierre: err instanceof Error ? err.message : String(err) };
+  }
+
+  await guardarMensaje({
+    conversacionId: conversacion.id,
     rol: "assistant",
-    // El mensaje que se está respondiendo ES el último entrante: la ventana
-    // está abierta por definición en este momento, no hace falta releerla.
-    ultimoMensajeAt: new Date().toISOString(),
+    contenido: respuesta,
+    ...(resultado.externalId
+      ? { externalId: resultado.externalId }
+      : { errorEntrega: resultado.motivoCierre ?? "No se pudo enviar" }),
   });
 
-  if (resultado.externalId) {
-    await marcarExternalId(guardado.id, resultado.externalId).catch(() => {});
-  } else {
+  if (!resultado.externalId) {
     logger.warn(
       { canal: params.canal, conversacionId: conversacion.id, motivo: resultado.motivoCierre },
       "No se pudo enviar la respuesta del bot",
