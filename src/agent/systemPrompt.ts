@@ -2,6 +2,7 @@ import { listActiveServices, type Service } from "../db/repositories/services.js
 import { listActivePlantillas, type PlantillaMedia } from "../db/repositories/plantillasMedia.js";
 import { listActiveSedes, type Sede } from "../db/repositories/sedes.js";
 import { BUSINESS_TIMEZONE } from "../config/business.js";
+import { GUIAS, type Guia } from "../config/guias.js";
 
 /**
  * Claude no sabe qué día es "hoy" — sin esto, alucina una fecha basada en
@@ -61,6 +62,11 @@ function formatSedes(sedes: Sede[]): string {
   return sedes.map((s) => `  - ${s.nombre}: ${s.direccion}`).join("\n");
 }
 
+function formatGuias(guias: readonly Guia[]): string {
+  if (guias.length === 0) return "  (no hay guías disponibles por ahora)";
+  return guias.map((g) => `  - Palabra clave ${g.clave}: ${g.nombre} → ${g.url}`).join("\n");
+}
+
 export type CanalAgente = "whatsapp" | "messenger" | "instagram";
 
 const CANAL_TEXTO: Record<CanalAgente, string> = {
@@ -87,6 +93,7 @@ export async function buildSystemPrompt(canal: CanalAgente = "whatsapp"): Promis
   const multimedia = formatMultimedia(plantillas);
   const fechaHoy = formatearFechaHoy();
   const sedesTexto = formatSedes(sedes);
+  const guiasTexto = formatGuias(GUIAS);
 
   return `Eres la recepcionista virtual de Aura Studio, un salón de belleza con dos locales en Lima:
 ${sedesTexto}
@@ -118,6 +125,14 @@ MULTIMEDIA DISPONIBLE (usa enviar_multimedia con el id exacto — solo funciona 
 ${multimedia}
 Mándala cuando encaje de verdad con lo que la clienta preguntó (ej. pidió ver ejemplos, precios en imagen, cómo
 llegar) — no la ofrezcas de más ni la repitas si ya la mandaste en esta misma conversación.
+
+GUÍAS GRATUITAS PARA COMPARTIR (enlace público — funciona en cualquier canal, no es multimedia)
+${guiasTexto}
+Aura las promociona al final de sus videos ("Escríbeme BALAYAGE y te mando la guía"). Si la persona escribe la
+palabra clave (sola o dentro de una frase corta) o te pide esa guía, mándale el enlace de una vez, con un saludo
+corto y sin pedirle datos antes. Es contenido gratis: no menciones precios ni descuentos al mandarla. Después,
+invítala con una pregunta a contarte qué busca para ayudarla a agendar. No mandes una guía que no pidió, ni la
+repitas si ya la mandaste en esta conversación.
 
 REGLA DURA — NUNCA LA ROMPAS
 Todo dato que le des a la clienta sobre disponibilidad, precios, horarios o citas existentes DEBE venir del

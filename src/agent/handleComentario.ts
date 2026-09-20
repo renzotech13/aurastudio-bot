@@ -5,6 +5,7 @@ import { guardarMensaje, actualizarMetadataPorExternalId } from "../db/repositor
 import { getCanalConfig } from "../db/repositories/canales.js";
 import { registrarEvento } from "../db/repositories/eventos.js";
 import { responderComentarioPrivado } from "../meta/client.js";
+import { elegirRespuestaPrivada } from "./respuestaPrivada.js";
 import type { CanalMeta, EventoMeta } from "../meta/parser.js";
 
 const TIPO_IDENTIDAD_COMENTARIO: Record<CanalMeta, "fb_comment_user" | "ig_comment_user"> = {
@@ -75,12 +76,13 @@ export async function handleComentario(evento: EventoComentario): Promise<void> 
   // Solo al comentario original (no a una respuesta anidada) y solo con el
   // interruptor encendido de verdad — apagado por defecto porque Meta solo
   // deja UNA respuesta privada por comentario: gastarla con un texto mal
-  // configurado no tiene vuelta atrás.
-  const debeResponderPrivado =
-    canalConfig?.activo && canalConfig.ia_comentarios_activa && canalConfig.texto_respuesta_privada && !evento.parentId;
-  if (!debeResponderPrivado) return;
+  // configurado no tiene vuelta atrás. Si el comentario pide una guía (la
+  // palabra clave del final de un video), la respuesta es el enlace a esa guía;
+  // si no, el texto fijo del canal. La decisión vive en respuestaPrivada.ts.
+  const respuesta = elegirRespuestaPrivada({ texto: evento.texto, parentId: evento.parentId, config: canalConfig });
+  if (!respuesta) return;
 
-  const textoRespuesta = canalConfig.texto_respuesta_privada!;
+  const textoRespuesta = respuesta.texto;
   try {
     const resultado = await responderComentarioPrivado({ canal: evento.canal, commentId: evento.externalId, texto: textoRespuesta });
 
@@ -113,8 +115,14 @@ export async function handleComentario(evento: EventoComentario): Promise<void> 
       tipo: "sistema",
       contenido: "Respuesta privada enviada automáticamente.",
     });
-    await actualizarMetadataPorExternalId(evento.externalId, { respondido_privado: true });
-    await registrarEvento(conversacion.id, "respuesta_privada", { comment_id: evento.externalId }).catch((err: unknown) =>
+    await actualizarMetadataPorExternalId(evento.externalId, {
+      respondido_privado: true,
+      ...(respuesta.guia ? { guia_enviada: respuesta.guia } : {}),
+    });
+    await registrarEvento(conversacion.id, "respuesta_privada", {
+      comment_id: evento.externalId,
+      ...(respuesta.guia ? { guia: respuesta.guia } : {}),
+    }).catch((err: unknown) =>
       logger.error({ err }, "No se pudo registrar el evento de respuesta privada"),
     );
   } catch (err) {

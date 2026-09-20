@@ -152,3 +152,23 @@ describe("buildSystemPrompt", () => {
     expect(promptInstagram).toContain("guardar_datos_contacto");
   });
 });
+
+describe("buildSystemPrompt — guías gratuitas", () => {
+  it.each(["whatsapp", "instagram", "messenger"] as const)("incluye la guía de balayage con su enlace por %s", async (canal) => {
+    const prompt = await buildSystemPrompt(canal);
+    expect(prompt).toContain("GUÍAS GRATUITAS PARA COMPARTIR");
+    expect(prompt).toContain("Palabra clave BALAYAGE");
+    expect(prompt).toContain("https://aurastudio.pe/guias/balayage");
+  });
+
+  it("le dice al agente que no prometa precios ni descuentos al mandar la guía", async () => {
+    const prompt = await buildSystemPrompt();
+    expect(prompt).toContain("no menciones precios ni descuentos");
+  });
+
+  it("no le pide al agente usar enviar_multimedia para la guía (es un enlace, no un archivo)", async () => {
+    const prompt = await buildSystemPrompt();
+    const seccion = prompt.slice(prompt.indexOf("GUÍAS GRATUITAS PARA COMPARTIR"), prompt.indexOf("REGLA DURA"));
+    expect(seccion).not.toContain("enviar_multimedia");
+  });
+});
