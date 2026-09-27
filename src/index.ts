@@ -7,6 +7,7 @@ import { healthRoutes } from "./routes/health.js";
 import { webhookRoutes } from "./routes/webhook.js";
 import { metaWebhookRoutes } from "./routes/metaWebhook.js";
 import { adminRoutes } from "./routes/admin.js";
+import { equipoRoutes } from "./routes/equipo.js";
 import { publicRoutes } from "./routes/public.js";
 import { calendarWebhookRoutes } from "./routes/calendarWebhook.js";
 import { syncPendingCitas } from "./calendar/retrySync.js";
@@ -62,6 +63,7 @@ await app.register(healthRoutes);
 await app.register(webhookRoutes);
 await app.register(metaWebhookRoutes);
 await app.register(adminRoutes);
+await app.register(equipoRoutes);
 await app.register(publicRoutes);
 await app.register(calendarWebhookRoutes);
 
