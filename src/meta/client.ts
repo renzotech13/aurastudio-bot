@@ -13,6 +13,15 @@ function tokenRequerido(): string {
   return env.META_PAGE_ACCESS_TOKEN;
 }
 
+/** Meta: "esta persona no es propietaria del hilo" — otra app conectada (p. ej. Metricool) tiene el control de la conversación. */
+const SUBCODE_NO_ES_DUENO_DEL_HILO = 2534037;
+
+class GraphApiError extends AppError {
+  constructor(readonly subcode: number | null) {
+    super("No se pudo completar la acción en Meta", "meta_api_failed", 502);
+  }
+}
+
 async function llamarGraphApi(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
   const url = `${GRAPH_BASE_URL}${path}?access_token=${encodeURIComponent(tokenRequerido())}`;
   const res = await fetch(url, {
@@ -24,9 +33,43 @@ async function llamarGraphApi(path: string, body: Record<string, unknown>): Prom
   if (!res.ok) {
     const errorBody = await res.text();
     logger.error({ status: res.status, errorBody, path }, "Falló una llamada a la Graph API de Meta");
-    throw new AppError("No se pudo completar la acción en Meta", "meta_api_failed", 502);
+    let subcode: number | null = null;
+    try {
+      subcode = (JSON.parse(errorBody) as { error?: { error_subcode?: number } }).error?.error_subcode ?? null;
+    } catch {
+      // cuerpo no JSON: se queda sin subcode
+    }
+    throw new GraphApiError(subcode);
   }
   return (await res.json()) as Record<string, unknown>;
+}
+
+/**
+ * Envía un mensaje; si Meta lo rechaza porque otra app conectada a la cuenta
+ * tiene el control del hilo (típico después de una automatización de
+ * Metricool), toma el control y reintenta una vez. Requiere que la app tenga
+ * activado "Tomar el control de las conversaciones" en Enrutamiento de
+ * conversaciones del portfolio; si no, el segundo intento falla igual y el
+ * error sube como antes.
+ */
+async function enviarConControlDelHilo(
+  canal: CanalMeta,
+  recipientId: string,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const path = `/${env.META_PAGE_ID}/messages`;
+  try {
+    return await llamarGraphApi(path, body);
+  } catch (err) {
+    if (!(err instanceof GraphApiError) || err.subcode !== SUBCODE_NO_ES_DUENO_DEL_HILO) throw err;
+    logger.info({ canal, recipientId }, "Otra app tiene el control del hilo: se toma el control y se reintenta");
+    await llamarGraphApi(`/${env.META_PAGE_ID}/take_thread_control`, {
+      recipient: { id: recipientId },
+      ...(canal === "instagram" ? { platform: "instagram" } : {}),
+      metadata: "Aura Studio Bot",
+    });
+    return llamarGraphApi(path, body);
+  }
 }
 
 /**
@@ -54,7 +97,7 @@ export async function enviarTexto(params: {
   texto: string;
   modo: ModoEnvioMeta;
 }): Promise<EnvioMetaResultado> {
-  const data = await llamarGraphApi(`/${env.META_PAGE_ID}/messages`, {
+  const data = await enviarConControlDelHilo(params.canal, params.recipientId, {
     recipient: { id: params.recipientId },
     message: { text: params.texto },
     ...messagingType(params.modo),
@@ -77,7 +120,7 @@ export async function enviarAdjunto(params: {
   modo: ModoEnvioMeta;
 }): Promise<EnvioMetaResultado> {
   const tipoGraph = TIPO_ATTACHMENT_ENVIO[params.tipo] ?? "file";
-  const data = await llamarGraphApi(`/${env.META_PAGE_ID}/messages`, {
+  const data = await enviarConControlDelHilo(params.canal, params.recipientId, {
     recipient: { id: params.recipientId },
     message: { attachment: { type: tipoGraph, payload: { url: params.url, is_reusable: true } } },
     ...messagingType(params.modo),
