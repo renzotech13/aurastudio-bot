@@ -209,3 +209,59 @@ export async function listarPlantillas(): Promise<Plantilla[]> {
     };
   });
 }
+
+/**
+ * Manda una plantilla a Meta para que la apruebe (de minutos a unas horas). Cuelga de la WABA, como listarPlantillas.
+ * `allow_category_change`: si Meta cree que una de Utilidad es de Marketing, la reclasifica en vez de rechazarla.
+ */
+export async function crearPlantilla(params: {
+  nombre: string;
+  categoria: "UTILITY" | "MARKETING";
+  idioma: string;
+  cuerpo: string;
+  /** Un valor de ejemplo por cada {{n}} del cuerpo, en orden: Meta no deja mandar a revisión sin ellos. */
+  ejemplos?: string[];
+  pie?: string;
+  /** Botones de respuesta rápida (máx. 25 caracteres cada uno): al tocarlos la clienta escribe ese texto y se abre la ventana de 24 h. */
+  botonesRespuesta?: string[];
+}): Promise<{ id: string; estado: string }> {
+  if (!env.WHATSAPP_WABA_ID) {
+    throw new AppError("Falta WHATSAPP_WABA_ID: sin esa variable no se pueden crear plantillas.", "waba_id_no_configurado", 500);
+  }
+  const components: Record<string, unknown>[] = [
+    {
+      type: "BODY",
+      text: params.cuerpo,
+      ...(params.ejemplos && params.ejemplos.length > 0 ? { example: { body_text: [params.ejemplos] } } : {}),
+    },
+  ];
+  if (params.pie) components.push({ type: "FOOTER", text: params.pie });
+  if (params.botonesRespuesta && params.botonesRespuesta.length > 0) {
+    components.push({ type: "BUTTONS", buttons: params.botonesRespuesta.map((text) => ({ type: "QUICK_REPLY", text })) });
+  }
+
+  const res = await fetch(`${GRAPH_BASE_URL}/${env.WHATSAPP_WABA_ID}/message_templates`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: params.nombre,
+      language: params.idioma,
+      category: params.categoria,
+      allow_category_change: true,
+      components,
+    }),
+  });
+  const cuerpo = (await res.json().catch(() => ({}))) as {
+    id?: string;
+    status?: string;
+    error?: { message?: string; error_user_msg?: string };
+  };
+  if (!res.ok || !cuerpo.id) {
+    throw new AppError(
+      `Meta rechazó crear la plantilla ${params.nombre}: ${cuerpo.error?.error_user_msg ?? cuerpo.error?.message ?? res.status}`,
+      "whatsapp_template_create_failed",
+      502,
+    );
+  }
+  return { id: cuerpo.id, estado: cuerpo.status ?? "PENDING" };
+}
