@@ -4,7 +4,9 @@ import { env, whatsappConfigurado, metaConfigurado, instagramConfigurado } from 
 import { logger } from "../lib/logger.js";
 import { requireAtencion, requireStaff } from "../lib/adminAuth.js";
 import { estadoDeNuevaCita, estadoPermitido, inicioPermitido } from "../lib/vendedorReglas.js";
+import { parametrosPlantilla, valoresDe, type Variable } from "../reactivacion/reactivacionReglas.js";
 import { normalizarTelefono } from "../lib/telefono.js";
+import { supabase } from "../db/client.js";
 import {
   getConversacionConDestino,
   getOrCreateConversacionAbierta,
@@ -71,6 +73,11 @@ const comentarioResponderSchema = z.object({
 const clienteTelefonoSchema = z.object({
   telefono: z.string().trim().min(6),
   fusionar: z.boolean().optional(),
+});
+
+const reactivacionPruebaSchema = z.object({
+  regla_id: z.string().uuid(),
+  telefono: z.string().trim().min(6),
 });
 
 const SIETE_DIAS_MS = 7 * 24 * 60 * 60_000;
@@ -409,6 +416,48 @@ export async function adminRoutes(app: FastifyInstance) {
 
     logger.info({ enviadas, fallidas: fallidas.length, plantilla }, "Campaña de promoción procesada");
     return reply.send({ enviadas, fallidas });
+  });
+
+  /**
+   * Manda la plantilla de una regla de reactivación a UN número, con datos de
+   * ejemplo, para comprobar que Meta ya la aprobó y que se ve bien ANTES de
+   * prender el envío automático. Es solo de la administradora, y nunca toca a
+   * una clienta: el teléfono lo escribe ella.
+   */
+  app.post("/admin/reactivacion/prueba", async (request: FastifyRequest, reply: FastifyReply) => {
+    await requireStaff(request.headers.authorization);
+
+    const parsed = reactivacionPruebaSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
+
+    const telefono = normalizarTelefono(parsed.data.telefono);
+    if (!telefono) return reply.status(400).send({ error: "telefono_invalido" });
+
+    const { data: regla, error } = await supabase
+      .from("reglas_reactivacion")
+      .select("plantilla, variables, oferta, codigo")
+      .eq("id", parsed.data.regla_id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!regla) return reply.status(404).send({ error: "regla_no_encontrada" });
+
+    try {
+      const valores = valoresDe({ clienteNombre: "Prueba", servicio: "Baby boomer", oferta: regla.oferta, codigo: regla.codigo });
+      await sendTemplate({
+        to: telefono,
+        plantilla: regla.plantilla,
+        idioma: env.WHATSAPP_TEMPLATE_LANG,
+        parametros: parametrosPlantilla(regla.variables as Variable[], valores),
+      });
+    } catch (err) {
+      // Lo más común: la plantilla todavía no está aprobada (o no existe) en Meta.
+      const motivo = err instanceof Error ? err.message : String(err);
+      logger.warn({ err, plantilla: regla.plantilla }, "La plantilla de reactivación de prueba no salió");
+      return reply.status(502).send({ error: "meta_rechazo", detalle: motivo });
+    }
+
+    logger.info({ plantilla: regla.plantilla }, "Plantilla de reactivación de prueba enviada");
+    return reply.send({ ok: true });
   });
 
   /**
