@@ -29,6 +29,37 @@ export async function requireStaff(authorizationHeader: string | undefined): Pro
   return { id: data.user.id, email: data.user.email ?? null };
 }
 
+export type AtencionUser = AdminUser & { rol: "staff" | "vendedor" };
+
+/**
+ * Staff o vendedor: quien atiende la bandeja y las reservas.
+ *
+ * Se usa solo en las rutas /admin/* que un vendedor necesita (responder chats,
+ * crear o cancelar una reserva). Todo lo demás — promociones, bloqueos,
+ * plantillas — sigue en requireStaff y le contesta 403. Quien llama decide, a
+ * partir de `rol`, si algo es solo de la administradora (p. ej. marcar una cita
+ * como «completada»).
+ */
+export async function requireAtencion(authorizationHeader: string | undefined): Promise<AtencionUser> {
+  const token = authorizationHeader?.startsWith("Bearer ") ? authorizationHeader.slice("Bearer ".length) : null;
+  if (!token) throw new AppError("Falta el token de sesión", "missing_token", 401);
+
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data.user) throw new AppError("Sesión inválida o expirada", "invalid_token", 401);
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", data.user.id)
+    .maybeSingle();
+  if (profileError) throw profileError;
+  if (profile?.role !== "staff" && profile?.role !== "vendedor") {
+    throw new AppError("Se requiere rol staff o vendedor", "forbidden", 403);
+  }
+
+  return { id: data.user.id, email: data.user.email ?? null, rol: profile.role };
+}
+
 export type ProfesionalUser = {
   id: string;
   email: string | null;

@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { env, whatsappConfigurado, metaConfigurado, instagramConfigurado } from "../config/env.js";
 import { logger } from "../lib/logger.js";
-import { requireStaff } from "../lib/adminAuth.js";
+import { requireAtencion, requireStaff } from "../lib/adminAuth.js";
+import { estadoDeNuevaCita, estadoPermitido, inicioPermitido } from "../lib/vendedorReglas.js";
 import { normalizarTelefono } from "../lib/telefono.js";
 import {
   getConversacionConDestino,
@@ -84,7 +85,7 @@ export async function adminRoutes(app: FastifyInstance) {
    * recibió (y que Claude luego leería como contexto real).
    */
   app.post("/admin/mensajes", async (request: FastifyRequest, reply: FastifyReply) => {
-    const staff = await requireStaff(request.headers.authorization);
+    const staff = await requireAtencion(request.headers.authorization);
 
     const parsed = mensajeSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -149,7 +150,7 @@ export async function adminRoutes(app: FastifyInstance) {
    * comentario, hasta 7 días desde que se creó).
    */
   app.post("/admin/comentarios/:mensajeId/responder", async (request: FastifyRequest, reply: FastifyReply) => {
-    const staff = await requireStaff(request.headers.authorization);
+    const staff = await requireAtencion(request.headers.authorization);
 
     const parsed = comentarioResponderSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
@@ -234,7 +235,7 @@ export async function adminRoutes(app: FastifyInstance) {
    * las tools que mutan y no escala la conversación ante ningún fallo.
    */
   app.post("/admin/ia/sugerencia", async (request: FastifyRequest, reply: FastifyReply) => {
-    await requireStaff(request.headers.authorization);
+    await requireAtencion(request.headers.authorization);
 
     const parsed = z.object({ conversacionId: z.string().uuid() }).safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
@@ -266,7 +267,7 @@ export async function adminRoutes(app: FastifyInstance) {
    * directo desde el navegador.
    */
   app.post("/admin/clientes/:id/telefono", async (request: FastifyRequest, reply: FastifyReply) => {
-    await requireStaff(request.headers.authorization);
+    await requireAtencion(request.headers.authorization);
 
     const parsed = clienteTelefonoSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
@@ -298,7 +299,7 @@ export async function adminRoutes(app: FastifyInstance) {
    * funcionando, no solo si las variables de entorno están cargadas.
    */
   app.get("/admin/canales/estado", async (request: FastifyRequest, reply: FastifyReply) => {
-    await requireStaff(request.headers.authorization);
+    await requireAtencion(request.headers.authorization);
 
     const meta = metaConfigurado ? await estadoConexion().catch(() => null) : null;
 
@@ -330,7 +331,7 @@ export async function adminRoutes(app: FastifyInstance) {
    * así que para ese canal no hace nada.
    */
   app.post("/admin/conversaciones/:id/visto", async (request: FastifyRequest, reply: FastifyReply) => {
-    await requireStaff(request.headers.authorization);
+    await requireAtencion(request.headers.authorization);
 
     const { id } = request.params as { id: string };
     const conv = await getConversacionConDestino(id);
@@ -423,11 +424,17 @@ export async function adminRoutes(app: FastifyInstance) {
    * recepción anotando lo que está pasando en este momento o acaba de pasar.
    */
   app.post("/admin/citas", async (request: FastifyRequest, reply: FastifyReply) => {
-    await requireStaff(request.headers.authorization);
+    const atencion = await requireAtencion(request.headers.authorization);
 
     const parsed = walkInSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
     const body = parsed.data;
+
+    // Un vendedor reserva a futuro y deja la cita «confirmada»: registrar lo que
+    // ya pasó en el salón es de la administradora (ver lib/vendedorReglas.ts).
+    if (!inicioPermitido(atencion.rol, new Date(body.inicio), new Date())) {
+      return reply.status(400).send({ error: "fecha_pasada" });
+    }
 
     const cliente = body.cliente_id
       ? await getClienteById(body.cliente_id)
@@ -445,7 +452,7 @@ export async function adminRoutes(app: FastifyInstance) {
       profesionalId: prof.id,
       sedeId: body.sede_id,
       omitirAntelacion: true,
-      estado: body.estado,
+      estado: estadoDeNuevaCita(atencion.rol, body.estado),
       ...(body.comentario ? { notas: body.comentario } : {}),
     });
 
@@ -465,10 +472,13 @@ export async function adminRoutes(app: FastifyInstance) {
    * credenciales de la service account, solo el bot las tiene.
    */
   app.post("/admin/citas/:id/estado", async (request: FastifyRequest, reply: FastifyReply) => {
-    await requireStaff(request.headers.authorization);
+    const atencion = await requireAtencion(request.headers.authorization);
 
     const parsed = citaEstadoSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: "invalid_body", detail: parsed.error.issues });
+    if (!estadoPermitido(atencion.rol, parsed.data.estado)) {
+      return reply.status(403).send({ error: "solo_administracion" });
+    }
 
     const { id } = request.params as { id: string };
     const cita = await actualizarEstadoCita(id, parsed.data.estado);

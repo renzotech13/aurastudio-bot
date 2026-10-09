@@ -13,6 +13,7 @@ import { calendarWebhookRoutes } from "./routes/calendarWebhook.js";
 import { syncPendingCitas } from "./calendar/retrySync.js";
 import { sincronizarCambiosCalendar, asegurarCanalWebhook } from "./calendar/pushSync.js";
 import { enviarRecordatoriosPendientes } from "./notifications/recordatorios.js";
+import { iniciarProgramados } from "./seguimientos/programados.js";
 import { metaConfigurado } from "./config/env.js";
 import { estadoConexion } from "./meta/client.js";
 import { barrerMetricasContenido } from "./meta/insights.js";
@@ -97,6 +98,8 @@ setInterval(() => {
     logger.error({ err }, "Fallo el barrido de recordatorios de cita");
   });
 }, RECORDATORIOS_INTERVAL_MS);
+
+iniciarProgramados();
 
 // Arranca el canal de webhooks y hace una primera pasada de sincronización
 // sin bloquear el arranque del servidor — si Google tarda o falla, el
