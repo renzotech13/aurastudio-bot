@@ -52,3 +52,17 @@ describe("anotarAnuncio", () => {
     expect(m).toMatchObject({ kind: "text", text: 'Hola\n\n(Llegó desde un anuncio de Meta: "Halloween — Pestañas")' });
   });
 });
+
+describe("botón de plantilla", () => {
+  it("convierte el toque de un botón de plantilla en texto con contexto", () => {
+    const [m] = parseInboundMessages({
+      object: "whatsapp_business_account",
+      entry: [{ id: "e", changes: [{ field: "messages", value: {
+        messaging_product: "whatsapp", metadata: { phone_number_id: "1" },
+        messages: [{ from: "51999", id: "w2", timestamp: "1", type: "button", button: { text: "Quiero reservar", payload: "Quiero reservar" } }],
+      } }] }],
+    });
+    expect(m).toMatchObject({ kind: "text" });
+    expect((m as { text: string }).text).toMatch(/^Quiero reservar\n\n\(Respondió tocando el botón «Quiero reservar»/);
+  });
+});

@@ -54,6 +54,16 @@ const metaInteractiveMessage = z.object({
   ]),
 });
 
+// Toque en un botón de respuesta rápida de una PLANTILLA (recordatorio, promo): Meta lo manda como type "button",
+// distinto de los botones de un mensaje interactivo. Sin esto, el bot ignoraba a quien respondía a una promo.
+const metaButtonMessage = z.object({
+  from: z.string(),
+  id: z.string(),
+  timestamp: z.string(),
+  type: z.literal("button"),
+  button: z.object({ text: z.string(), payload: z.string().optional() }),
+});
+
 // Cualquier otro type (image, sticker, location, reaction, unsupported...)
 // se acepta laxamente para poder identificarlo y descartarlo sin que zod
 // tire el mensaje completo del webhook.
@@ -69,6 +79,7 @@ const metaMessage = z.union([
   metaAudioMessage,
   metaImageMessage,
   metaInteractiveMessage,
+  metaButtonMessage,
   metaOtherMessage,
 ]);
 
@@ -187,6 +198,17 @@ export function anotarAnuncio(texto: string, referral?: { headline?: string | un
   return resumen ? `${texto}\n\n(Llegó desde un anuncio de Meta: "${resumen}")` : `${texto}\n\n(Llegó desde un anuncio de Meta)`;
 }
 
+/**
+ * Respuesta a un botón de plantilla convertida en texto para el agente, con una nota de contexto: así sabe que
+ * responde a un mensaje que Aura mandó primero (promo o recordatorio) y cómo tratar el botón de no recibir más.
+ */
+export function textoBotonPlantilla(texto: string): string {
+  return (
+    `${texto}\n\n(Respondió tocando el botón «${texto}» de un mensaje que le mandó Aura Studio. ` +
+    "Si el botón es para dejar de recibir promociones, confírmale con amabilidad que no le llegarán más y no insistas.)"
+  );
+}
+
 export function parseInboundMessages(rawBody: unknown): InboundMessage[] {
   const result = metaWebhookPayload.safeParse(rawBody);
   if (!result.success) return [];
@@ -216,6 +238,8 @@ export function parseInboundMessages(rawBody: unknown): InboundMessage[] {
             mediaId: msg.image.id,
             mimeType: msg.image.mime_type ?? "image/jpeg",
           });
+        } else if (msg.type === "button" && "button" in msg) {
+          messages.push({ kind: "text", ...base, text: textoBotonPlantilla(msg.button.text) });
         } else if (msg.type === "interactive" && "interactive" in msg) {
           const reply = msg.interactive.type === "button_reply" ? msg.interactive.button_reply : msg.interactive.list_reply;
           messages.push({ kind: "interactive_reply", ...base, replyId: reply.id, replyTitle: reply.title });
