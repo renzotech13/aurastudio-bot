@@ -9,6 +9,16 @@ const metaTextMessage = z.object({
   timestamp: z.string(),
   type: z.literal("text"),
   text: z.object({ body: z.string() }),
+  // Viene cuando la persona escribió tocando un anuncio de clic a WhatsApp: con esto el bot sabe de qué anuncio
+  // llega (la promo, el servicio) en vez de responder a ciegas a "Hola, quiero más información".
+  referral: z
+    .object({
+      headline: z.string().optional(),
+      body: z.string().optional(),
+      source_id: z.string().optional(),
+      source_type: z.string().optional(),
+    })
+    .optional(),
 });
 
 const metaAudioMessage = z.object({
@@ -166,6 +176,17 @@ export function parseFailedStatuses(rawBody: unknown): FailedStatus[] {
  * Devuelve una lista vacía para payloads que no traen mensajes de usuario
  * (p. ej. actualizaciones de estado de entrega/lectura).
  */
+/**
+ * Si el mensaje llegó desde un anuncio, se le agrega una nota con su título y texto para que el agente sepa a qué
+ * responde (el mensaje por defecto del anuncio es solo "Hola, quiero más información").
+ */
+export function anotarAnuncio(texto: string, referral?: { headline?: string | undefined; body?: string | undefined }): string {
+  if (!referral) return texto;
+  const partes = [referral.headline, referral.body].map((x) => (x ?? "").trim()).filter(Boolean);
+  const resumen = partes.join(" — ").slice(0, 300);
+  return resumen ? `${texto}\n\n(Llegó desde un anuncio de Meta: "${resumen}")` : `${texto}\n\n(Llegó desde un anuncio de Meta)`;
+}
+
 export function parseInboundMessages(rawBody: unknown): InboundMessage[] {
   const result = metaWebhookPayload.safeParse(rawBody);
   if (!result.success) return [];
@@ -185,7 +206,7 @@ export function parseInboundMessages(rawBody: unknown): InboundMessage[] {
         const base = { id: msg.id, from: msg.from, timestamp: msg.timestamp, ...(contactName ? { contactName } : {}) };
 
         if (msg.type === "text" && "text" in msg) {
-          messages.push({ kind: "text", ...base, text: msg.text.body });
+          messages.push({ kind: "text", ...base, text: anotarAnuncio(msg.text.body, msg.referral) });
         } else if (msg.type === "audio" && "audio" in msg) {
           messages.push({ kind: "audio", ...base, mediaId: msg.audio.id });
         } else if (msg.type === "image" && "image" in msg) {

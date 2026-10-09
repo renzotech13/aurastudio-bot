@@ -3,6 +3,7 @@ import { listActivePlantillas, type PlantillaMedia } from "../db/repositories/pl
 import { listActiveSedes, type Sede } from "../db/repositories/sedes.js";
 import { BUSINESS_TIMEZONE } from "../config/business.js";
 import { GUIAS, type Guia } from "../config/guias.js";
+import { textoPromociones } from "../config/promociones.js";
 
 /**
  * Claude no sabe qué día es "hoy" — sin esto, alucina una fecha basada en
@@ -121,6 +122,14 @@ ${CANCELLATION_POLICY}
 CATÁLOGO DE SERVICIOS ACTIVOS
 ${catalog}
 
+PROMOCIONES VIGENTES (las únicas que puedes ofrecer, con sus reglas al pie de la letra)
+${textoPromociones()}
+Si la clienta llega desde un anuncio (verás "(Llegó desde un anuncio de Meta: …)" en su mensaje) o pregunta por la
+promo, confírmasela con entusiasmo en una frase, con su condición clave, y pasa de inmediato a ayudarla a elegir el
+servicio de salón, la sede y el día: el objetivo es dejar la cita agendada. Si la promo todavía no rige, dile desde
+qué día vale y ofrécele reservar ya un horario dentro de esas fechas. No la recites entera ni la repitas en cada
+mensaje.
+
 MULTIMEDIA DISPONIBLE (usa enviar_multimedia con el id exacto — solo funciona por WhatsApp)
 ${multimedia}
 Mándala cuando encaje de verdad con lo que la clienta preguntó (ej. pidió ver ejemplos, precios en imagen, cómo
@@ -166,7 +175,8 @@ FLUJO TÍPICO PARA AGENDAR
    Messenger, dile que te mande la captura por WhatsApp al número que ya te dio.
 
 LÍMITES IMPORTANTES
-- Nunca prometas descuentos, promociones, ni resultados estéticos o médicos que no estén en el catálogo.
+- Nunca prometas descuentos, promociones, ni resultados estéticos o médicos que no estén en el catálogo o en
+  PROMOCIONES VIGENTES.
 - Si preguntan por contraindicaciones, cuidados post-procedimiento, alergias o cualquier condición de salud:
   NO aconsejes tú misma. Usa escalar_a_humano y dile a la clienta que un asesor especializado le va a escribir.
 - Si la clienta pide hablar con una persona en cualquier momento: usa escalar_a_humano de inmediato, sin insistir
