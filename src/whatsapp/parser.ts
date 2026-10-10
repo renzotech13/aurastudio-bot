@@ -34,7 +34,7 @@ const metaImageMessage = z.object({
   id: z.string(),
   timestamp: z.string(),
   type: z.literal("image"),
-  image: z.object({ id: z.string(), mime_type: z.string().optional() }),
+  image: z.object({ id: z.string(), mime_type: z.string().optional(), caption: z.string().optional() }),
 });
 
 const metaInteractiveMessage = z.object({
@@ -130,7 +130,17 @@ const metaWebhookPayload = z.object({
 export type InboundMessage =
   | { kind: "text"; id: string; from: string; timestamp: string; contactName?: string; text: string }
   | { kind: "audio"; id: string; from: string; timestamp: string; contactName?: string; mediaId: string }
-  | { kind: "image"; id: string; from: string; timestamp: string; contactName?: string; mediaId: string; mimeType: string }
+  | {
+      kind: "image";
+      id: string;
+      from: string;
+      timestamp: string;
+      contactName?: string;
+      mediaId: string;
+      mimeType: string;
+      /** Texto que la clienta escribió junto con la foto ("quiero este diseño"). */
+      caption?: string;
+    }
   | {
       kind: "interactive_reply";
       id: string;
@@ -237,6 +247,7 @@ export function parseInboundMessages(rawBody: unknown): InboundMessage[] {
             ...base,
             mediaId: msg.image.id,
             mimeType: msg.image.mime_type ?? "image/jpeg",
+            ...(msg.image.caption?.trim() ? { caption: msg.image.caption.trim() } : {}),
           });
         } else if (msg.type === "button" && "button" in msg) {
           messages.push({ kind: "text", ...base, text: textoBotonPlantilla(msg.button.text) });

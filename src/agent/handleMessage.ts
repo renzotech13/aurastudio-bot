@@ -6,15 +6,16 @@ import { getOrCreateConversacionAbierta } from "../db/repositories/conversacione
 import { guardarMensaje, marcarExternalId } from "../db/repositories/mensajes.js";
 import { sendTextIfWindowOpen } from "../whatsapp/window.js";
 import { handleInbound } from "./handleInbound.js";
-import { handleImageMessage } from "./handleImageMessage.js";
+import { guardarImagenEntrante, handleImageMessage } from "./handleImageMessage.js";
 import type { InboundMessage } from "../whatsapp/parser.js";
+import { textoDeOpcion } from "../whatsapp/formato.js";
 
 function extractText(message: InboundMessage): string | null {
   switch (message.kind) {
     case "text":
       return message.text;
     case "interactive_reply":
-      return message.replyTitle;
+      return textoDeOpcion(message.replyTitle, message.replyId);
     case "audio":
       return null; // se maneja aparte: mensaje fijo, no pasa por el agente.
     default:
@@ -48,13 +49,16 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
   }
 
   if (message.kind === "image") {
+    // La foto se guarda en el chat SIEMPRE, para que el staff la vea en el
+    // panel aunque ya esté atendiendo una persona.
+    const imagen = await guardarImagenEntrante(message, conversacion);
     if (conversacion.estado === "escalada") {
       // Mismo criterio: si ya hay una persona atendiendo, el flujo
       // automático de comprobantes de pago no debe correr por encima.
-      logger.info({ conversacionId: conversacion.id }, "Conversación escalada, se ignora la imagen");
+      logger.info({ conversacionId: conversacion.id }, "Conversación escalada, la imagen se guarda sin respuesta automática");
       return;
     }
-    await handleImageMessage(message, cliente, conversacion);
+    await handleImageMessage(message, cliente, conversacion, imagen);
     return;
   }
 

@@ -95,6 +95,21 @@ describe("parseInboundMessages", () => {
     ]);
   });
 
+  it("conserva el texto que la clienta escribió junto con la foto", () => {
+    const payload = webhookPayload([
+      {
+        from: "51999888777",
+        id: "wamid.5",
+        timestamp: "1700000004",
+        type: "image",
+        image: { id: "media-def", mime_type: "image/jpeg", caption: "  quiero este diseño " },
+      },
+    ]);
+    expect(parseInboundMessages(payload)).toEqual([
+      expect.objectContaining({ kind: "image", mediaId: "media-def", caption: "quiero este diseño" }),
+    ]);
+  });
+
   it("devuelve una lista vacía para eventos de estado de entrega/lectura", () => {
     const payload = {
       object: "whatsapp_business_account" as const,

@@ -2,6 +2,7 @@ import { supabase } from "../db/client.js";
 import { logger } from "../lib/logger.js";
 import { descargarMedia } from "../whatsapp/client.js";
 import { sendTextIfWindowOpen } from "../whatsapp/window.js";
+import { subirAdjunto } from "../lib/adjuntos.js";
 import { guardarMensaje, marcarExternalId } from "../db/repositories/mensajes.js";
 import { escalarConversacion } from "../db/repositories/conversaciones.js";
 import { getCitaPendienteDeComprobante, guardarComprobante } from "../db/repositories/citas.js";
@@ -29,25 +30,67 @@ const TEXTO_EN_REVISION =
   "Recibí tu comprobante 🙏 No pude confirmarlo automáticamente, así que lo va a revisar una asesora de Aura Studio " +
   "en breve. Te avisamos apenas quede confirmado.";
 
+type MensajeImagen = Extract<InboundMessage, { kind: "image" }>;
+
+/** Los bytes de la foto ya bajada de WhatsApp (null si la descarga falló), para no bajarla dos veces. */
+export type ImagenDescargada = { buffer: Buffer; mimeType: string } | null;
+
+/**
+ * Deja la foto en el chat para que el panel la muestre: se baja de WhatsApp
+ * (el media id caduca, hay que hacerlo al recibirla), se sube al bucket
+ * privado `adjuntos` y el mensaje queda con `media_path`. Corre SIEMPRE,
+ * también con la conversación escalada: antes la foto de una conversación
+ * escalada no se guardaba y el staff nunca la veía. Si la descarga falla, el
+ * mensaje se guarda igual con el error, para que el staff sepa que llegó
+ * algo y lo pida de nuevo (mismo criterio que documentoEntrante.ts de B&B).
+ */
+export async function guardarImagenEntrante(message: MensajeImagen, conversacion: Conversacion): Promise<ImagenDescargada> {
+  let descargada: ImagenDescargada = null;
+  let mediaPath: string | undefined;
+  let errorDescarga: string | undefined;
+  try {
+    descargada = await descargarMedia(message.mediaId);
+    mediaPath = await subirAdjunto({
+      conversacionId: conversacion.id,
+      buffer: descargada.buffer,
+      mimeType: descargada.mimeType,
+    });
+  } catch (err) {
+    errorDescarga = err instanceof Error ? err.message : String(err);
+    logger.error({ err, conversacionId: conversacion.id, waMessageId: message.id }, "No se pudo descargar/guardar la imagen entrante");
+  }
+
+  await guardarMensaje({
+    conversacionId: conversacion.id,
+    rol: "user",
+    contenido: message.caption ? `[Imagen recibida] ${message.caption}` : "[Imagen recibida]",
+    waMessageId: message.id,
+    mediaType: "image",
+    ...(mediaPath ? { mediaPath } : {}),
+    metadata: {
+      mime_type: descargada?.mimeType ?? message.mimeType,
+      ...(message.caption ? { caption: message.caption } : {}),
+      ...(errorDescarga ? { error_descarga: errorDescarga.slice(0, 300) } : {}),
+    },
+  });
+
+  return descargada;
+}
+
 /**
  * Flujo separado del loop conversacional normal (como el de audio): una
  * imagen no es un mensaje de texto que Claude deba interpretar con tools,
  * es un comprobante que se analiza una sola vez y de forma determinística.
  * Nunca decide "en silencio" — o confirma con evidencia clara, o deja el
  * caso visible para un humano (en_revision + conversación escalada).
+ * La foto ya quedó guardada en el chat por `guardarImagenEntrante`.
  */
 export async function handleImageMessage(
-  message: Extract<InboundMessage, { kind: "image" }>,
+  message: MensajeImagen,
   cliente: Cliente,
   conversacion: Conversacion,
+  imagen: ImagenDescargada,
 ): Promise<void> {
-  await guardarMensaje({
-    conversacionId: conversacion.id,
-    rol: "user",
-    contenido: "[Imagen recibida]",
-    waMessageId: message.id,
-  });
-
   const pendiente = await getCitaPendienteDeComprobante(cliente.id);
   if (!pendiente) {
     const guardado = await guardarMensaje({ conversacionId: conversacion.id, rol: "assistant", contenido: SIN_CITA_PENDIENTE });
@@ -60,7 +103,8 @@ export async function handleImageMessage(
 
   let respuesta: string;
   try {
-    const { buffer, mimeType } = await descargarMedia(message.mediaId);
+    if (!imagen) throw new Error("La imagen no se pudo descargar de WhatsApp");
+    const { buffer, mimeType } = imagen;
     const extension = EXTENSION_POR_MIME[mimeType] ?? "jpg";
     const path = `${cita.id}/${Date.now()}.${extension}`;
 

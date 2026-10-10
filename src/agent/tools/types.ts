@@ -24,6 +24,11 @@ export type AgentContext = {
    */
   telefono: string | null;
   contactName: string | undefined;
+  /**
+   * true cuando una tool ya le mandó un mensaje interactivo (lista, tarjetas, botones) en este turno: entonces el
+   * agente puede terminar sin texto final y no se manda un mensaje vacío ni el de "no pude responder".
+   */
+  interactivoEnviado?: boolean;
 };
 
 /**

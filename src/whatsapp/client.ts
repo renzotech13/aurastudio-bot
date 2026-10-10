@@ -1,6 +1,7 @@
 import { env } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 import { AppError } from "../lib/errors.js";
+import { LIMITES_WA, recortar, type FilaLista } from "./formato.js";
 
 // v21.0 estaba fijo acá y esa versión caduca el 21-ene-2027 — ahora comparte
 // la misma variable que Messenger/Instagram (META_GRAPH_VERSION).
@@ -265,3 +266,75 @@ export async function crearPlantilla(params: {
   }
   return { id: cuerpo.id, estado: cuerpo.status ?? "PENDING" };
 }
+
+// ---- Mensajes interactivos para reservar sin texto corrido ----
+
+/**
+ * Lista desplegable de WhatsApp: un botón ("Ver servicios") que abre hasta 10 opciones con título y una línea de
+ * descripción. Al tocar una, la clienta responde con esa opción (llega como interactive_reply con su id).
+ */
+export async function sendList(params: {
+  to: string;
+  cuerpo: string;
+  boton: string;
+  secciones: { titulo?: string; filas: FilaLista[] }[];
+  pie?: string;
+}): Promise<string> {
+  const total = params.secciones.reduce((n, s) => n + s.filas.length, 0);
+  if (total === 0 || total > LIMITES_WA.filas) {
+    throw new AppError(`sendList requiere entre 1 y ${LIMITES_WA.filas} filas`, "invalid_list", 500);
+  }
+  return callGraphApi({
+    to: params.to,
+    type: "interactive",
+    interactive: {
+      type: "list",
+      body: { text: recortar(params.cuerpo, LIMITES_WA.cuerpo, false) },
+      ...(params.pie ? { footer: { text: recortar(params.pie, 60) } } : {}),
+      action: {
+        button: recortar(params.boton, LIMITES_WA.botonLista),
+        sections: params.secciones.map((s) => ({
+          ...(s.titulo ? { title: recortar(s.titulo, 24) } : {}),
+          rows: s.filas.map((f) => ({
+            id: f.id.slice(0, 200),
+            title: recortar(f.titulo, LIMITES_WA.filaTitulo),
+            ...(f.descripcion ? { description: recortar(f.descripcion, LIMITES_WA.filaDescripcion) } : {}),
+          })),
+        })),
+      },
+    },
+  });
+}
+
+/**
+ * Tarjeta: foto arriba (opcional, JPG o PNG con URL pública), texto y hasta 3 botones de respuesta. Es lo más
+ * parecido a la "tarjeta de producto con botón Comprar" que se puede mandar sin catálogo: aquí el botón es "Reservar".
+ */
+export async function sendTarjeta(params: {
+  to: string;
+  cuerpo: string;
+  botones: ButtonOption[];
+  imagenUrl?: string | null;
+  pie?: string;
+}): Promise<string> {
+  if (params.botones.length === 0 || params.botones.length > 3) {
+    throw new AppError("sendTarjeta requiere entre 1 y 3 botones", "invalid_buttons", 500);
+  }
+  return callGraphApi({
+    to: params.to,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      ...(params.imagenUrl ? { header: { type: "image", image: { link: params.imagenUrl } } } : {}),
+      body: { text: recortar(params.cuerpo, LIMITES_WA.cuerpo, false) },
+      ...(params.pie ? { footer: { text: recortar(params.pie, 60) } } : {}),
+      action: {
+        buttons: params.botones.map((b) => ({
+          type: "reply",
+          reply: { id: b.id.slice(0, 256), title: recortar(b.title, LIMITES_WA.botonRespuesta) },
+        })),
+      },
+    },
+  });
+}
+

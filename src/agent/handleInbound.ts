@@ -1,11 +1,17 @@
 import { logger } from "../lib/logger.js";
 import { escalarConversacion, type Conversacion } from "../db/repositories/conversaciones.js";
-import { guardarMensaje } from "../db/repositories/mensajes.js";
+import { guardarMensaje, ultimoMensajeDeClienta } from "../db/repositories/mensajes.js";
 import { getCanalConfig } from "../db/repositories/canales.js";
 import { getCanalAdapter, type CanalActivo } from "../canales/index.js";
 import { runAgent, FALLBACK_MESSAGE } from "./runner.js";
 
 const AGENT_TIMEOUT_MS = 25_000;
+/**
+ * Espera antes de responder: si la clienta manda varios mensajes seguidos ("Hola" / "¿tienen cita hoy?"), se responde
+ * UNA vez al último, con todo el contexto. Antes cada mensaje disparaba su propia respuesta y salían duplicadas.
+ */
+const ESPERA_MENSAJES_SEGUIDOS_MS = process.env.NODE_ENV === "test" ? 0 : 6_000;
+const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function runAgentWithTimeout(ctx: Parameters<typeof runAgent>[0], userText: string): Promise<string> {
   let timeoutId: NodeJS.Timeout;
@@ -49,10 +55,20 @@ export async function handleInbound(params: {
 }): Promise<void> {
   const { conversacion } = params;
 
-  await guardarMensaje({ conversacionId: conversacion.id, rol: "user", contenido: params.texto, externalId: params.externalId });
+  const entrante = await guardarMensaje({ conversacionId: conversacion.id, rol: "user", contenido: params.texto, externalId: params.externalId });
 
   if (conversacion.estado === "escalada") {
     logger.info({ conversacionId: conversacion.id }, "Conversación escalada, el bot no responde");
+    return;
+  }
+
+  let ultimo: string | null = entrante?.id ?? null;
+  if (ESPERA_MENSAJES_SEGUIDOS_MS > 0) {
+    await esperar(ESPERA_MENSAJES_SEGUIDOS_MS);
+    ultimo = await ultimoMensajeDeClienta(conversacion.id).catch(() => entrante.id);
+  }
+  if (ultimo && entrante?.id && ultimo !== entrante.id) {
+    logger.info({ conversacionId: conversacion.id }, "Llegó otro mensaje de la clienta: responde ese, con los dos en contexto");
     return;
   }
 
@@ -79,6 +95,9 @@ export async function handleInbound(params: {
     respuesta = FALLBACK_MESSAGE;
     await escalarConversacion(conversacion.id).catch(() => {});
   }
+
+  // La respuesta ya salió como lista, tarjetas o botones (tools interactivas): no se manda un texto vacío.
+  if (!respuesta.trim()) return;
 
   // Enviar antes de guardar: si esto tira (Meta/WhatsApp rechazó el envío,
   // no solo "ventana cerrada"), el catch lo convierte en el mismo shape que

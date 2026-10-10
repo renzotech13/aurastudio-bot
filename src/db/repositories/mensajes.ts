@@ -173,3 +173,17 @@ export async function getHistorialReciente(
   if (error) throw error;
   return ((data ?? []) as Mensaje[]).reverse();
 }
+
+/** Id del último mensaje de la clienta en la conversación (para responder una sola vez a varios mensajes seguidos). */
+export async function ultimoMensajeDeClienta(conversacionId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("mensajes")
+    .select("id")
+    .eq("conversacion_id", conversacionId)
+    .eq("rol", "user")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { id: string } | null)?.id ?? null;
+}

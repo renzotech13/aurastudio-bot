@@ -9,6 +9,7 @@ import { cancelarCitaTool } from "./cancelarCita.js";
 import { escalarAHumanoTool } from "./escalarAHumano.js";
 import { enviarMultimediaTool } from "./enviarMultimedia.js";
 import { guardarDatosContactoTool } from "./guardarDatosContacto.js";
+import { mostrarServiciosTool, ofrecerHorariosTool, preguntarConBotonesTool } from "./interactivos.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ALL_TOOLS: AgentTool<any>[] = [
@@ -21,6 +22,9 @@ const ALL_TOOLS: AgentTool<any>[] = [
   escalarAHumanoTool,
   enviarMultimediaTool,
   guardarDatosContactoTool,
+  mostrarServiciosTool,
+  ofrecerHorariosTool,
+  preguntarConBotonesTool,
 ];
 
 export type ModoAgente = "responder" | "sugerir";

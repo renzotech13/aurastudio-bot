@@ -106,6 +106,8 @@ export async function runAgent(ctx: AgentContext, userMessage: string, opts: { m
       if (response.stop_reason !== "tool_use") {
         const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === "text");
         if (textBlock?.text) return textBlock.text;
+        // Ya salió una lista, tarjeta o botones: no hace falta texto aparte (handleInbound no manda nada vacío).
+        if (ctx.interactivoEnviado) return "";
         break;
       }
 
